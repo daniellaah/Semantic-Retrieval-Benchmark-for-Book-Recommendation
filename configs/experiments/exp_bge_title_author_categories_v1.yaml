@@ -1,0 +1,21 @@
+experiment_id: exp_bge_title_author_categories_v1
+
+model:
+  name: BAAI/bge-m3
+  max_length: 512
+  batch_size: 64
+  normalize_embeddings: true
+
+text_views:
+  views:
+    - view_id: view_tac
+      fields: [title, author, categories]
+      template: |
+        Title: {title}
+        Author: {author}
+        Categories: {categories}
+
+fusion:
+  method: identity
+  input_views: [view_tac]
+  normalization: false
