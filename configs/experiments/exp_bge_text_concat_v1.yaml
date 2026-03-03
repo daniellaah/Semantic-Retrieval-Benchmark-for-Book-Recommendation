@@ -1,0 +1,25 @@
+experiment_id: exp_bge_text_concat_v1
+
+model:
+  name: BAAI/bge-m3
+  max_length: 512
+  batch_size: 64
+  normalize_embeddings: true
+
+text_views:
+  views:
+    - view_id: view_all
+      fields: [title, subtitle, author, description, features, categories]
+      template: |
+        Title: {title}
+        Subtitle: {subtitle}
+        Author: {author}
+        Description: {description}
+        Features: {features}
+        Categories: {categories}
+
+fusion:
+  method: identity
+  input_views: [view_all]
+  normalization: false
+

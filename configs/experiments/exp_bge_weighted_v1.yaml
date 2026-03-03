@@ -1,0 +1,39 @@
+experiment_id: exp_bge_weighted_v1
+
+model:
+  name: BAAI/bge-m3
+  max_length: 512
+  batch_size: 64
+  normalize_embeddings: true
+
+text_views:
+  views:
+    - view_id: view_title
+      fields: [title, subtitle, author]
+      template: |
+        Title: {title}
+        Subtitle: {subtitle}
+        Author: {author}
+    - view_id: view_description
+      fields: [description]
+      template: |
+        Description: {description}
+    - view_id: view_features
+      fields: [features]
+      template: |
+        Features: {features}
+    - view_id: view_categories
+      fields: [categories]
+      template: |
+        Categories: {categories}
+
+fusion:
+  method: weighted_mean
+  input_views: [view_title, view_description, view_features, view_categories]
+  weights:
+    view_title: 0.4
+    view_description: 0.2
+    view_features: 0.2
+    view_categories: 0.2
+  normalization: true
+

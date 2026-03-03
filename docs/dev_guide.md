@@ -1,6 +1,6 @@
 # 开发文档（v0.2）
 
-最后更新: `2026-03-01`
+最后更新: `2026-03-02`
 
 ## 1. 项目目标与成功标准
 
@@ -14,7 +14,7 @@
 
 评估成功标准（当前版本）:
 
-- 必须报告: `Recall@10`, `Recall@50`, `NDCG@10`, `NDCG@50`, `MRR@10`, `NDCG@50`。
+- 必须报告: `Recall@10`, `Recall@50`, `NDCG@10`, `NDCG@50`, `MRR@10`, `MRR@50`。
 - 必须固定: 数据切分、候选库、索引类型、检索 topK、随机种子。
 - 每次实验必须输出可追溯的配置与结果文件（见第 9 节）。
 
@@ -64,6 +64,7 @@ src/
   retrieval/
   eval/
 configs/
+  experiments/
 reports/
 outputs/
 docs/
@@ -71,31 +72,25 @@ docs/
 
 各阶段输出:
 
-- `data/processed/items.jsonl`: Item 文本语料（唯一 item 粒度）
+- `data/processed/items.jsonl`: Item 结构化语料（唯一 item 粒度，不含 `text`）
 - `data/processed/interactions_train.jsonl`: 训练交互
 - `data/processed/interactions_eval.jsonl`: 评估交互
-- `outputs/embeddings/<model_name>/item_embeddings.npy`: item 向量
-- `outputs/index/<model_name>/faiss.index`: 检索索引
+- `outputs/embeddings/<model_name>/<experiment_id>/item_embeddings.npy`: 按实验配置产出的 item 向量
+- `outputs/index/<model_name>/<experiment_id>/faiss.index`: 按实验配置构建的检索索引
 - `reports/eval/<run_id>.json`: 指标结果
 - `reports/eval/<run_id>.md`: 结果解读与结论
 
-## 4. 数据源与字段冻结
+## 4. 数据源与字段约定
 
 数据源（Amazon Reviews 2023 Books）:
 
-- `data/raw/meta_Books.jsonl.gz`
-- `data/raw/Books.jsonl.gz`
+- `data/raw/meta_Books.jsonl`
+- `data/raw/Books.jsonl`
 
-字段冻结流程（必须先做）:
+字段:
 
-1. 对 `meta_Books.jsonl.gz` 和 `Books.jsonl.gz` 各抽样 `1,000` 条。
-2. 输出字段探查报告到 `reports/data_profile/`。
-3. 在本节补充最终字段清单并标记是否必需。
-
-当前建议优先字段（以实际数据 schema 为准）:
-
-- Item 主键: `parent_asin` 或等价字段
-- 文本字段: `title`, `description`, `features`, `categories`
+- Item 主键: `parent_asin`
+- 文本字段: `title`, `description`, `features`, `categories`, `subtitle`, `author`
 - 交互字段: `user_id`, `parent_asin`, `rating`, `timestamp`
 
 数据质量规则:
@@ -104,11 +99,11 @@ docs/
 - 缺失: 关键字段缺失则丢弃（规则需记录在报告）。
 - 文本清洗: 去首尾空格，合并连续空白，统一换行为空格。
 
-## 5. Item 文本信息构造规范
+## 5. Item 字段构造规范
 
 输入:
 
-- `data/raw/meta_Books.jsonl.gz`
+- `data/raw/meta_Books.jsonl`
 
 输出:
 
@@ -117,22 +112,14 @@ docs/
 `items.jsonl` 目标 schema:
 
 ```json
-{"item_id":"B000XXXX","title":"...","description":"...","features":["..."],"categories":["..."],"text":"..."}
+{"item_id":"B000XXXX","title":"...","subtitle":"...","author":"...","description":"...","features":["..."],"categories":["..."]}
 ```
 
 字段说明:
 
 - `item_id`: 统一主键，后续模块全部使用该键。
-- `text`: 检索与 embedding 的最终输入文本。
-
-文本拼接模板（v0.2）:
-
-```text
-Title: {title}
-Description: {description}
-Features: {feature_1}; {feature_2}; ...
-Categories: {cat_1} > {cat_2} > ...
-```
+- `items.jsonl` 仅保留结构化字段，不直接落 `text`。
+- 文本拼接（view/template）与 embedding 生成由下游阶段负责（见第 7 节）。
 
 脚本路径约定:
 
@@ -141,14 +128,14 @@ Categories: {cat_1} > {cat_2} > ...
 验收标准:
 
 - `items.jsonl` 中 `item_id` 唯一率 `100%`
-- `text` 非空率 >= `95%`
+- `items.jsonl` 中关键字段（`item_id`, `title`）非空率需记录在报告
 - 输出行数、去重率、缺失率写入 `reports/data_profile/items_build_report.json`
 
 ## 6. User 正样本与评估集构造规范
 
 输入:
 
-- `data/raw/Books.jsonl.gz`
+- `data/raw/Books.jsonl`
 - `data/processed/items.jsonl`
 
 输出:
@@ -188,6 +175,69 @@ Categories: {cat_1} > {cat_2} > ...
 - `batch_size=64`（按设备可降）
 - `normalize_embeddings=True`
 
+Embedding 输入约定:
+
+- 由 embedding 阶段基于 `items.jsonl` + 实验配置动态渲染文本，不产出 `items_text.jsonl` 中间文件
+- 实验配置统一放在 `configs/experiments/*.yaml`
+- 每个 `view_id` 单独生成一份 item embedding
+- 对多视图 embedding 做融合后再建索引，融合方式由 `fusion.method` 指定
+
+实验配置模板（示例）:
+
+```yaml
+experiment_id: exp_bge_mview_weighted_v1
+model:
+  name: BAAI/bge-m3
+  max_length: 512
+  batch_size: 64
+  normalize_embeddings: true
+
+text_views:
+  views:
+    - view_id: view_title
+      fields: [title, subtitle, author]
+      template: |
+        Title: {title}
+        Subtitle: {subtitle}
+        Author: {author}
+    - view_id: view_description
+      fields: [description]
+      template: |
+        Description: {description}
+    - view_id: view_features
+      fields: [features]
+      template: |
+        Features: {features}
+    - view_id: view_categories
+      fields: [categories]
+      template: |
+        Categories: {categories}
+
+fusion:
+  method: weighted_mean
+  input_views: [view_title_meta, view_description, view_features, view_categories]
+  weights:
+    view_title_meta: 0.4
+    view_description: 0.2
+    view_features: 0.2
+    view_categories: 0.2
+  normalization: true
+```
+
+融合策略（首批）:
+
+- `baseline_concat_text`: 单文本拼接基线（全字段拼成一个 view 后直接建索引）
+- `mean`: 多 view 等权平均（模型输出向量默认已归一化；若 `normalization=true`，则融合后再归一化）
+- `weighted_mean`: 多 view 加权平均（默认 `view_title=0.4`, `view_description=0.2`, `view_features=0.2`, `view_categories=0.2`）
+- `concat`: 多 view 向量拼接（P1 可选，需单独记录维度变化与索引成本）
+- `late_fusion`: 多索引分数融合（P1 可选）
+
+`fusion.normalization` 语义:
+
+- 布尔值字段，仅控制“融合后向量是否做归一化”。
+- 模型输出 embedding 默认已归一化，不通过该字段控制。
+- `identity` 融合下建议设为 `false`（或由实现忽略该字段）。
+
 索引规范:
 
 - 第一阶段统一用 `faiss.IndexFlatIP`
@@ -205,8 +255,8 @@ Categories: {cat_1} > {cat_2} > ...
 离线评估指标:
 
 - `Recall@10`, `Recall@50`
-- `NDCG@10`
-- `MRR@10`
+- `NDCG@10`, `NDCG@50`
+- `MRR@10`, `MRR@50`
 
 评估口径:
 
@@ -233,6 +283,9 @@ Categories: {cat_1} > {cat_2} > ...
 - 推理参数（batch、max_length、normalize）
 - 索引参数（类型、topK）
 - 随机种子、设备信息
+- 实验配置信息（`experiment_id`, `experiment_config_path`, `view_ids`, `fusion_method`）
+- 融合归一化开关（`fusion_normalization`）
+- 配置哈希信息（`text_config_hash`, `fusion_config_hash`, `full_config_hash`）
 
 ## 10. 开发与 Code/Function Review 规范
 
@@ -259,10 +312,9 @@ Review 重点:
 
 P0:
 
-1. 完成数据字段探查并冻结 schema（第 4 节）。
-2. 实现 `build_items.py` 并产出 `items.jsonl`（第 5 节）。
-3. 实现评估集构造脚本并固定切分规则（第 6 节）。
-4. 跑通一个 baseline 模型全流程并输出首份 `run_id` 报告。
+1. 实现 `build_items.py` 并产出结构化 `items.jsonl`（第 5 节）。
+2. 实现评估集构造脚本并固定切分规则（第 6 节）。
+3. 跑通一个 baseline 模型全流程并输出首份 `run_id` 报告。
 
 P1:
 
