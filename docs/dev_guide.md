@@ -132,7 +132,7 @@ docs/
 
 脚本路径约定:
 
-- `src/data/text_preprocess/build_items.py`
+- `src/data/build_items.py`
 
 验收标准:
 
@@ -169,6 +169,11 @@ docs/
 
 - 每个用户取一个 query item（默认最后一次正反馈之前的一次）。
 - 目标 item 为该用户最后一次正反馈 item。
+
+脚本路径约定:
+
+- `src/data/build_interactions.py`
+- `src/data/build_eval.py`
 
 ## 7. Embedding 生成与索引构建
 

@@ -1,0 +1,40 @@
+{
+  "generated_at_utc": "2026-03-03T22:23:53.802656+00:00",
+  "config": {
+    "seed": 42,
+    "books_input": "data/raw/Books.jsonl",
+    "items_input": "data/processed/items.jsonl",
+    "output": "data/interim/interactions.jsonl"
+  },
+  "items_catalog": {
+    "rows_total": 4448181,
+    "parse_error_rows": 0,
+    "non_object_rows": 0,
+    "rows_missing_item_id": 0,
+    "unique_item_ids": 4448181
+  },
+  "books_input_stats": {
+    "rows_total": 29475453,
+    "parse_error_rows": 0,
+    "non_object_rows": 0,
+    "rows_missing_user_id": 0,
+    "rows_missing_item_id": 0,
+    "rows_missing_rating": 0,
+    "rows_missing_timestamp": 0,
+    "rows_invalid_rating": 0,
+    "rows_invalid_timestamp": 0,
+    "rows_item_not_in_items": 0
+  },
+  "output_stats": {
+    "rows_written": 29475453,
+    "unique_users": 10297355,
+    "unique_items": 4446065,
+    "timestamp_min": 834970084000,
+    "timestamp_max": 1694657549017
+  },
+  "rates": {
+    "drop_rate_over_all_rows": 0.0,
+    "item_not_in_items_rate_over_all_rows": 0.0,
+    "parse_error_rate_over_all_rows": 0.0
+  }
+}
