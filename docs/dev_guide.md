@@ -1,6 +1,6 @@
-# 开发文档（v0.2）
+# 开发文档（v0.3）
 
-最后更新: `2026-03-02`
+最后更新: `2026-03-03`
 
 ## 1. 项目目标与成功标准
 
@@ -54,12 +54,9 @@ export HF_HOME=.hf-cache
 ```text
 data/
   raw/
-  interim/
   processed/
 src/
   data/
-    text_preprocess/
-    sampling/
   embedding/
   retrieval/
   eval/
@@ -73,8 +70,11 @@ docs/
 各阶段输出:
 
 - `data/processed/items.jsonl`: Item 结构化语料（唯一 item 粒度，不含 `text`）
-- `data/processed/interactions_train.jsonl`: 训练交互
-- `data/processed/interactions_eval.jsonl`: 评估交互
+- `data/processed/interactions.jsonl`: 清洗后的全量交互（保留 rating）
+- `data/processed/eval.jsonl`: 评估 query/target 集
+- `reports/data_profile/build_items_report.json`: items 构建统计
+- `reports/data_profile/build_interactions_report.json`: interactions 构建统计
+- `reports/data_profile/build_eval_report.json`: eval 构建统计
 - `outputs/embeddings/<model_name>/<experiment_id>/<run_id>/item_embeddings.npy`: 按实验配置产出的 item 向量
 - `outputs/index/<model_name>/<experiment_id>/<run_id>/faiss.index`: 按实验配置构建的检索索引
 - `reports/eval/<run_id>.json`: 指标结果
@@ -138,9 +138,11 @@ docs/
 
 - `items.jsonl` 中 `item_id` 唯一率 `100%`
 - `items.jsonl` 中关键字段（`item_id`, `title`）非空率需记录在报告
-- 输出行数、去重率、缺失率写入 `reports/data_profile/items_build_report.json`
+- 输出行数、去重率、缺失率写入 `reports/data_profile/build_items_report.json`
 
-## 6. User 正样本与评估集构造规范
+## 6. User 正样本与评估集构造规范（当前实现）
+
+### 6.1 交互清洗（build_interactions）
 
 输入:
 
@@ -149,30 +151,63 @@ docs/
 
 输出:
 
-- `data/processed/interactions_train.jsonl`
-- `data/processed/interactions_eval.jsonl`
-- `data/processed/eval_queries.jsonl`
+- `data/processed/interactions.jsonl`
+- `reports/data_profile/build_interactions_report.json`
 
-交互 schema:
+交互 schema（`interactions.jsonl`）:
 
 ```json
-{"user_id":"UXXX","item_id":"B000XXXX","label":1,"timestamp":1700000000}
+{"user_id":"UXXX","item_id":"B000XXXX","rating":5.0,"timestamp":1700000000}
 ```
 
-构造规则（v0.2）:
+构造规则:
 
-- 正样本定义: `rating >= 4` 视为正反馈（若无 rating 字段，则用行为存在性定义）。
-- 过滤: 用户和 item 至少各有 `5` 次正反馈（可调，需记录）。
-- 切分: 按时间切分，最后一次正反馈用于 eval，其余用于 train。
+- 仅保留合法对象行；坏 JSON/非对象行计入报告并跳过。
+- 必需字段: `user_id`, `parent_asin`, `rating`, `timestamp`。
+- `parent_asin -> item_id`，且 `item_id` 必须存在于 `items.jsonl`。
+- `timestamp` 保留原始量纲（不做秒/毫秒转换）。
 
-评估 query 构造:
-
-- 每个用户取一个 query item（默认最后一次正反馈之前的一次）。
-- 目标 item 为该用户最后一次正反馈 item。
-
-脚本路径约定:
+脚本路径:
 
 - `src/data/build_interactions.py`
+
+### 6.2 评估集构造（build_eval）
+
+输入:
+
+- `data/processed/interactions.jsonl`
+
+输出:
+
+- `data/processed/eval.jsonl`
+- `reports/data_profile/build_eval_report.json`
+
+评估样本 schema（`eval.jsonl`）:
+
+```json
+{"user_id":"UXXX","query_item_ids":["B000A","B000B"],"target_item_id":"B000C"}
+```
+
+构造规则:
+
+- 正样本定义: `rating >= rating_threshold`（默认 `4.0`）。
+- 默认不过滤用户/item 频次（`min_user_pos=1`, `min_item_pos=1`）。
+- 当 `min_user_pos > 1` 或 `min_item_pos > 1` 时，启用迭代 k-core 过滤。
+- 每用户按 `(timestamp asc, input_order asc)` 排序。
+- `target_item_id`: 该用户最后一次正反馈 item。
+- `query_item_ids`: 最后一次之前最近 `query_history_n` 次（默认 `1`）。
+- 若用户无历史（仅 1 条正反馈），该用户不产出 eval 样本（记录在报告中）。
+
+CLI 关键参数:
+
+- `--rating-threshold`（默认 `4.0`）
+- `--min-user-pos`（默认 `1`）
+- `--min-item-pos`（默认 `1`）
+- `--query-history-n`（默认 `1`）
+- `--seed`（默认 `42`）
+
+脚本路径:
+
 - `src/data/build_eval.py`
 
 ## 7. Embedding 生成与索引构建
@@ -332,9 +367,9 @@ Review 重点:
 
 P0:
 
-1. 实现 `build_items.py` 并产出结构化 `items.jsonl`（第 5 节）。
-2. 实现评估集构造脚本并固定切分规则（第 6 节）。
-3. 跑通一个 baseline 模型全流程并输出首份 `run_id` 报告。
+1. 打通 embedding + index + search + evaluate 全流程，消费 `data/processed/eval.jsonl` 并产出首份 `run_id` 报告。
+2. 固化 baseline 实验配置与运行命令，保证同配置可复跑同结果。
+3. 在 `reports/eval/` 输出首份指标解读（Recall/NDCG/MRR）及失败样本分析。
 
 P1:
 

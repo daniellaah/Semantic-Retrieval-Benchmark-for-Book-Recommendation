@@ -4,7 +4,7 @@
     "seed": 42,
     "books_input": "data/raw/Books.jsonl",
     "items_input": "data/processed/items.jsonl",
-    "output": "data/interim/interactions.jsonl"
+    "output": "data/processed/interactions.jsonl"
   },
   "items_catalog": {
     "rows_total": 4448181,

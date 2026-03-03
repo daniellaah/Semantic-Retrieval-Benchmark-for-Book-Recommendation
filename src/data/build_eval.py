@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--report-output",
-        default="reports/data_profile/interactions_build_report.json",
+        default="reports/data_profile/build_eval_report.json",
         help="Output build report json path.",
     )
     parser.add_argument(

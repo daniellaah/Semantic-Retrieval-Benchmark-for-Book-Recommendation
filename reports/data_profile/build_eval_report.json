@@ -2,9 +2,9 @@
   "generated_at_utc": "2026-03-03T22:51:24.945147+00:00",
   "config": {
     "seed": 42,
-    "interactions_input": "data/interim/interactions.jsonl",
+    "interactions_input": "data/processed/interactions.jsonl",
     "queries_output": "data/processed/eval.jsonl",
-    "report_output": "reports/data_profile/interactions_build_report.json",
+    "report_output": "reports/data_profile/build_eval_report.json",
     "rating_threshold": 4.0,
     "min_user_pos": 1,
     "min_item_pos": 1,
