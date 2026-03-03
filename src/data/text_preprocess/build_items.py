@@ -155,10 +155,24 @@ def main() -> None:
             score_non_empty = excluded.score_non_empty,
             score_chars = excluded.score_chars
         WHERE
-            excluded.score_non_empty > items.score_non_empty
+            (
+                CASE WHEN excluded.title != '' THEN 1 ELSE 0 END
+            ) > (
+                CASE WHEN items.title != '' THEN 1 ELSE 0 END
+            )
             OR (
-                excluded.score_non_empty = items.score_non_empty
-                AND excluded.score_chars > items.score_chars
+                (
+                    CASE WHEN excluded.title != '' THEN 1 ELSE 0 END
+                ) = (
+                    CASE WHEN items.title != '' THEN 1 ELSE 0 END
+                )
+                AND (
+                    excluded.score_non_empty > items.score_non_empty
+                    OR (
+                        excluded.score_non_empty = items.score_non_empty
+                        AND excluded.score_chars > items.score_chars
+                    )
+                )
             );
         """
 
@@ -179,6 +193,9 @@ def main() -> None:
                 try:
                     raw = json.loads(line)
                 except json.JSONDecodeError:
+                    parse_error_rows += 1
+                    continue
+                if not isinstance(raw, dict):
                     parse_error_rows += 1
                     continue
 
@@ -263,6 +280,12 @@ def main() -> None:
                 "missing_title_rate": (
                     rows_missing_title / input_rows_total if input_rows_total else 0.0
                 ),
+                "missing_title_rate_over_item_id_rows": (
+                    rows_missing_title / rows_with_item_id if rows_with_item_id else 0.0
+                ),
+                "missing_title_rate_over_all_rows": (
+                    rows_missing_title / input_rows_total if input_rows_total else 0.0
+                ),
             },
             "dedup": {
                 "unique_item_ids_before_title_filter": unique_item_ids_before_title_filter,
@@ -285,7 +308,7 @@ def main() -> None:
                     "categories": "' > '",
                     "description_list_join": "' '",
                 },
-                "dedup_keep_rule": "prefer higher (non_empty_field_count, total_char_count)",
+                "dedup_keep_rule": "for same item_id: prefer non-empty title first, then higher (non_empty_field_count, total_char_count)",
                 "drop_rule": "drop rows with empty item_id or empty title",
             },
         }
