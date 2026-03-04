@@ -74,6 +74,7 @@ docs/
 - `reports/data_profile/build_items_report.json`: items 构建统计
 - `reports/data_profile/build_interactions_report.json`: interactions 构建统计
 - `reports/data_profile/build_eval_report.json`: eval 构建统计
+- `reports/data_profile/build_items_subset_from_eval_report.json`: eval 驱动的 items 子集构建统计
 - `outputs/embeddings/<model_name>/<experiment_id>/<run_id>/item_embeddings.npy`: 按实验配置产出的 item 向量
 - `outputs/index/<model_name>/<experiment_id>/<run_id>/faiss.index`: 按实验配置构建的检索索引
 - `outputs/eval/<eval_run_id>/predictions.jsonl`: 每条 query 的 topK 检索结果
@@ -209,6 +210,32 @@ CLI 关键参数:
 脚本路径:
 
 - `src/data/build_eval.py`
+
+### 6.3 开发集降规模（build_items_subset_from_eval）
+
+用途:
+
+- 当 `items.jsonl` 过大导致 embedding 生成耗时过长时，用 `eval.jsonl` 中实际出现的 item（`query_item_ids + target_item_id`）构建一个子集 items 文件，用于快速迭代。
+
+输入:
+
+- `data/processed/eval.jsonl`
+- `data/processed/items.jsonl`
+
+输出:
+
+- `data/processed/items_eval_subset.jsonl`
+- `reports/data_profile/build_items_subset_from_eval_report.json`
+
+规则:
+
+- 从每条合法 eval 样本收集 `target_item_id` 与全部非空 `query_item_ids`。
+- 仅保留 `items.jsonl` 中主键命中的行，并保持原始扫描顺序。
+- 产出覆盖率、缺失 item 数、压缩比例等统计。
+
+脚本路径:
+
+- `src/data/build_items_subset_from_eval.py`
 
 ## 7. Embedding 生成与索引构建
 

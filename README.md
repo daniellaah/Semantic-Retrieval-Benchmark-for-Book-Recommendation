@@ -124,6 +124,18 @@ UV_CACHE_DIR=.uv-cache uv run python src/data/build_eval.py \
   --seed 42
 ```
 
+### 3.5) Build smaller items subset from eval (optional, for faster embedding iteration)
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python src/data/build_items_subset_from_eval.py \
+  --eval-input data/processed/eval.jsonl \
+  --items-input data/processed/items.jsonl \
+  --output data/processed/items_eval_subset.jsonl \
+  --report reports/data_profile/build_items_subset_from_eval_report.json
+```
+
+Use `data/processed/items_eval_subset.jsonl` as `--items-input` in embedding runs for fast dev iteration.
+
 ### 4) Generate item embeddings
 
 ```bash
@@ -239,6 +251,7 @@ Main outputs:
 - `reports/data_profile/build_items_report.json`
 - `reports/data_profile/build_interactions_report.json`
 - `reports/data_profile/build_eval_report.json`
+- `reports/data_profile/build_items_subset_from_eval_report.json`
 - `outputs/embeddings/<model>/<experiment_id>/<run_id>/item_embeddings.npy`
 - `outputs/embeddings/<model>/<experiment_id>/<run_id>/item_ids.jsonl`
 - `outputs/eval/<eval_run_id>/predictions.jsonl`
@@ -259,6 +272,7 @@ Run all core unit tests:
 UV_CACHE_DIR=.uv-cache uv run python -m unittest \
   tests/test_build_interactions.py \
   tests/test_build_eval.py \
+  tests/test_build_items_subset_from_eval.py \
   tests/test_generate_item_embeddings.py \
   tests/test_ann_utils.py \
   tests/test_run_eval.py
