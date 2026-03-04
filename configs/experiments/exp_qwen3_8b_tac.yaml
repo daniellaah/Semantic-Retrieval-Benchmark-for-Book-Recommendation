@@ -1,0 +1,21 @@
+experiment_id: exp_qwen3_8b_tac
+
+model:
+  name: Qwen/Qwen3-Embedding-8B
+  embedding_dim: 4096
+  max_length: 512
+  normalize_embeddings: true
+
+text_views:
+  views:
+    - view_id: view_tac
+      fields: [title, author, categories]
+      template: |
+        Title: {title}
+        Author: {author}
+        Categories: {categories}
+
+fusion:
+  method: identity
+  input_views: [view_tac]
+  normalization: false
