@@ -8,7 +8,6 @@ import hashlib
 import json
 import re
 import time
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -343,11 +342,6 @@ def parse_args() -> argparse.Namespace:
         help="Root output directory for run config snapshots.",
     )
     parser.add_argument(
-        "--run-id",
-        default=None,
-        help="Optional run id. If omitted, auto-generated.",
-    )
-    parser.add_argument(
         "--device",
         default="mps",
         help="Requested device: mps/cuda/cpu.",
@@ -380,6 +374,11 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def generate_run_id_local() -> str:
+    now_local = datetime.now()
+    return now_local.strftime("%Y%m%d%H%M%S")
+
+
 def main() -> None:
     args = parse_args()
     items_input = Path(args.items_input)
@@ -407,7 +406,7 @@ def main() -> None:
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    run_id = args.run_id or f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    run_id = generate_run_id_local()
     model_dir = sanitize_model_name_for_path(model_name)
     experiment_id = str(exp_cfg["experiment_id"])
 
