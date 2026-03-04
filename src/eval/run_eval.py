@@ -1,0 +1,491 @@
+#!/usr/bin/env python3
+"""Run offline retrieval evaluation on eval query set."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import random
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.retrieval.ann_utils import build_faiss_index, load_embeddings, load_item_ids
+
+
+def normalize_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def ensure_parent_dir(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def parse_topk_list(value: str) -> list[int]:
+    tokens = [x.strip() for x in value.split(",") if x.strip()]
+    if not tokens:
+        raise ValueError("topk list cannot be empty")
+    ks: list[int] = []
+    for token in tokens:
+        k = int(token)
+        if k <= 0:
+            raise ValueError("topk values must be > 0")
+        ks.append(k)
+    return sorted(set(ks))
+
+
+def file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def infer_embedding_identity(embedding_dir: Path) -> dict[str, str]:
+    model_dir_name = ""
+    model_name_guess = ""
+    experiment_id = ""
+    embedding_run_id = ""
+
+    if embedding_dir.name:
+        embedding_run_id = embedding_dir.name
+    if embedding_dir.parent and embedding_dir.parent.name:
+        experiment_id = embedding_dir.parent.name
+    if embedding_dir.parent and embedding_dir.parent.parent and embedding_dir.parent.parent.name:
+        model_dir_name = embedding_dir.parent.parent.name
+        model_name_guess = model_dir_name.replace("__", "/")
+
+    return {
+        "model_dir_name": model_dir_name,
+        "model_name_guess": model_name_guess,
+        "experiment_id": experiment_id,
+        "embedding_run_id": embedding_run_id,
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run retrieval evaluation from eval.jsonl.")
+    parser.add_argument(
+        "--eval-input",
+        default="data/processed/eval.jsonl",
+        help="Input eval queries jsonl path.",
+    )
+    parser.add_argument(
+        "--embedding-dir",
+        required=True,
+        help="Embedding artifact directory containing item_ids.jsonl and item_embeddings.npy.",
+    )
+    parser.add_argument(
+        "--output-root",
+        default="outputs/eval",
+        help="Root output dir. Files are written to <output_root>/<eval_run_id>/.",
+    )
+    parser.add_argument(
+        "--eval-run-id",
+        default="",
+        help="Optional eval run id. Default is local timestamp YYYYMMDDHHMMSS.",
+    )
+    parser.add_argument(
+        "--max-query",
+        type=int,
+        default=0,
+        help="Maximum number of valid eval queries to evaluate. 0 means no limit.",
+    )
+    parser.add_argument(
+        "--topk",
+        default="10,50",
+        help="Comma-separated metric K list, e.g. '10,50'.",
+    )
+    parser.add_argument(
+        "--index-type",
+        choices=["flat", "hnsw"],
+        default="flat",
+        help="ANN index type.",
+    )
+    parser.add_argument(
+        "--hnsw-m",
+        type=int,
+        default=32,
+        help="HNSW M parameter (used only when --index-type hnsw).",
+    )
+    parser.add_argument(
+        "--hnsw-ef-search",
+        type=int,
+        default=64,
+        help="HNSW efSearch parameter (used only when --index-type hnsw).",
+    )
+    parser.add_argument(
+        "--hnsw-ef-construction",
+        type=int,
+        default=200,
+        help="HNSW efConstruction parameter (used only when --index-type hnsw).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for deterministic runtime metadata.",
+    )
+    args = parser.parse_args()
+    if args.max_query < 0:
+        parser.error("--max-query must be >= 0")
+
+    args.topk_list = parse_topk_list(args.topk)
+    return args
+
+
+def make_query_vector(vectors: np.ndarray, query_rows: list[int]) -> np.ndarray:
+    query_vec = vectors[np.array(query_rows, dtype=np.int64)].mean(axis=0, dtype=np.float32)
+    norm = float(np.linalg.norm(query_vec))
+    if norm <= 1e-12:
+        raise ValueError("zero-norm query vector")
+    return (query_vec / norm).astype(np.float32, copy=False)
+
+
+def search_topk_excluding_rows(
+    *,
+    index: Any,
+    item_ids: list[str],
+    query_vec: np.ndarray,
+    excluded_rows: set[int],
+    top_k: int,
+) -> list[dict[str, Any]]:
+    if top_k <= 0:
+        return []
+    ntotal = int(index.ntotal)
+    if ntotal <= 0:
+        return []
+
+    target_k = min(top_k, ntotal)
+    search_k = min(ntotal, max(target_k + len(excluded_rows) + 16, target_k))
+    neighbors: list[dict[str, Any]] = []
+    seen_rows: set[int] = set()
+
+    while True:
+        scores, row_ids = index.search(query_vec.reshape(1, -1), search_k)
+        for row_id, score in zip(row_ids[0].tolist(), scores[0].tolist()):
+            if row_id < 0:
+                continue
+            if row_id in excluded_rows:
+                continue
+            if row_id in seen_rows:
+                continue
+            seen_rows.add(row_id)
+            neighbors.append(
+                {
+                    "rank": len(neighbors) + 1,
+                    "item_id": item_ids[row_id],
+                    "score": float(score),
+                }
+            )
+            if len(neighbors) >= target_k:
+                return neighbors
+
+        if search_k >= ntotal:
+            break
+        search_k = min(ntotal, search_k * 2)
+
+    return neighbors
+
+
+def find_rank(predictions: list[dict[str, Any]], target_item_id: str) -> int | None:
+    for pred in predictions:
+        if pred["item_id"] == target_item_id:
+            return int(pred["rank"])
+    return None
+
+
+def metric_value(rank: int | None, k: int) -> tuple[float, float, float]:
+    if rank is None or rank > k:
+        return 0.0, 0.0, 0.0
+    recall = 1.0
+    mrr = 1.0 / float(rank)
+    ndcg = 1.0 / math.log2(float(rank) + 1.0)
+    return recall, mrr, ndcg
+
+
+def main() -> None:
+    args = parse_args()
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+
+    eval_input = Path(args.eval_input)
+    embedding_dir = Path(args.embedding_dir)
+    item_ids_input = embedding_dir / "item_ids.jsonl"
+    embeddings_input = embedding_dir / "item_embeddings.npy"
+
+    if not item_ids_input.exists():
+        raise FileNotFoundError(f"Missing item_ids.jsonl in embedding dir: {item_ids_input}")
+    if not embeddings_input.exists():
+        raise FileNotFoundError(f"Missing item_embeddings.npy in embedding dir: {embeddings_input}")
+
+    eval_run_id = args.eval_run_id.strip() or datetime.now().strftime("%Y%m%d%H%M%S")
+    run_output_dir = Path(args.output_root) / eval_run_id
+    predictions_output = run_output_dir / "predictions.jsonl"
+    report_output = run_output_dir / "run_eval_report.json"
+    info_output = run_output_dir / "info.json"
+
+    ensure_parent_dir(predictions_output)
+    ensure_parent_dir(report_output)
+    ensure_parent_dir(info_output)
+
+    item_ids, item_id_to_row = load_item_ids(item_ids_input)
+    embeddings = load_embeddings(embeddings_input)
+    if embeddings.shape[0] != len(item_ids):
+        raise ValueError(
+            "Row mismatch between embeddings and item_ids: "
+            f"embeddings_rows={embeddings.shape[0]}, item_ids_rows={len(item_ids)}"
+        )
+
+    index, vectors = build_faiss_index(
+        embeddings=embeddings,
+        index_type=args.index_type,
+        hnsw_m=args.hnsw_m,
+        hnsw_ef_search=args.hnsw_ef_search,
+        hnsw_ef_construction=args.hnsw_ef_construction,
+        normalize=True,
+    )
+
+    ks = args.topk_list
+    max_k = max(ks)
+    sum_hit = {k: 0.0 for k in ks}
+    sum_mrr = {k: 0.0 for k in ks}
+    sum_ndcg = {k: 0.0 for k in ks}
+
+    input_rows_total = 0
+    parse_error_rows = 0
+    non_object_rows = 0
+    rows_missing_user_id = 0
+    rows_missing_target_item_id = 0
+    rows_invalid_query_list = 0
+
+    dropped_target_not_in_index = 0
+    dropped_query_contains_target = 0
+    dropped_query_item_not_in_index = 0
+    dropped_query_empty_after_clean = 0
+    dropped_zero_norm_query = 0
+
+    valid_eval_rows = 0
+
+    with eval_input.open("r", encoding="utf-8") as in_f, predictions_output.open(
+        "w", encoding="utf-8"
+    ) as pred_f:
+        for line in in_f:
+            input_rows_total += 1
+            line = line.strip()
+            if not line:
+                parse_error_rows += 1
+                continue
+            try:
+                raw = json.loads(line)
+            except json.JSONDecodeError:
+                parse_error_rows += 1
+                continue
+            if not isinstance(raw, dict):
+                non_object_rows += 1
+                continue
+
+            user_id = normalize_text(raw.get("user_id"))
+            target_item_id = normalize_text(raw.get("target_item_id"))
+            query_item_ids_raw = raw.get("query_item_ids")
+
+            if not user_id:
+                rows_missing_user_id += 1
+                continue
+            if not target_item_id:
+                rows_missing_target_item_id += 1
+                continue
+            if not isinstance(query_item_ids_raw, list):
+                rows_invalid_query_list += 1
+                continue
+
+            cleaned_query_item_ids: list[str] = []
+            seen_query_item_ids: set[str] = set()
+            for item in query_item_ids_raw:
+                item_id = normalize_text(item)
+                if not item_id:
+                    continue
+                if item_id in seen_query_item_ids:
+                    continue
+                seen_query_item_ids.add(item_id)
+                cleaned_query_item_ids.append(item_id)
+
+            if not cleaned_query_item_ids:
+                dropped_query_empty_after_clean += 1
+                continue
+            if target_item_id in seen_query_item_ids:
+                dropped_query_contains_target += 1
+                continue
+
+            target_row = item_id_to_row.get(target_item_id)
+            if target_row is None:
+                dropped_target_not_in_index += 1
+                continue
+
+            query_rows: list[int] = []
+            missing_query_item = False
+            for query_item_id in cleaned_query_item_ids:
+                query_row = item_id_to_row.get(query_item_id)
+                if query_row is None:
+                    missing_query_item = True
+                    break
+                query_rows.append(query_row)
+            if missing_query_item:
+                dropped_query_item_not_in_index += 1
+                continue
+            if not query_rows:
+                dropped_query_empty_after_clean += 1
+                continue
+
+            try:
+                query_vec = make_query_vector(vectors, query_rows)
+            except ValueError:
+                dropped_zero_norm_query += 1
+                continue
+
+            predictions = search_topk_excluding_rows(
+                index=index,
+                item_ids=item_ids,
+                query_vec=query_vec,
+                excluded_rows=set(query_rows),
+                top_k=max_k,
+            )
+
+            target_rank = find_rank(predictions, target_item_id)
+            valid_eval_rows += 1
+
+            for k in ks:
+                hit, mrr, ndcg = metric_value(target_rank, k)
+                sum_hit[k] += hit
+                sum_mrr[k] += mrr
+                sum_ndcg[k] += ndcg
+
+            pred_f.write(
+                json.dumps(
+                    {
+                        "user_id": user_id,
+                        "query_item_ids": cleaned_query_item_ids,
+                        "target_item_id": target_item_id,
+                        "target_rank": target_rank,
+                        "predictions": predictions,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+            if args.max_query > 0 and valid_eval_rows >= args.max_query:
+                break
+
+    metrics: dict[str, dict[str, float]] = {}
+    for k in ks:
+        denom = float(valid_eval_rows) if valid_eval_rows else 1.0
+        metrics[f"@{k}"] = {
+            "hit_rate": sum_hit[k] / denom,
+            "recall": sum_hit[k] / denom,
+            "mrr": sum_mrr[k] / denom,
+            "ndcg": sum_ndcg[k] / denom,
+        }
+
+    embedding_identity = infer_embedding_identity(embedding_dir)
+    eval_input_resolved = eval_input.resolve()
+    eval_sha = file_sha256(eval_input)
+    generated_at = datetime.now(timezone.utc).isoformat()
+
+    report = {
+        "generated_at_utc": generated_at,
+        "config": {
+            "seed": args.seed,
+            "eval_run_id": eval_run_id,
+            "eval_input": str(eval_input_resolved),
+            "eval_input_sha256": eval_sha,
+            "embedding_dir": str(embedding_dir.resolve()),
+            "item_ids_input": str(item_ids_input.resolve()),
+            "embeddings_input": str(embeddings_input.resolve()),
+            "output_root": str(Path(args.output_root).resolve()),
+            "predictions_output": str(predictions_output.resolve()),
+            "report_output": str(report_output.resolve()),
+            "info_output": str(info_output.resolve()),
+            "topk": ks,
+            "max_query": args.max_query,
+            "index_type": args.index_type,
+            "hnsw_m": args.hnsw_m,
+            "hnsw_ef_search": args.hnsw_ef_search,
+            "hnsw_ef_construction": args.hnsw_ef_construction,
+        },
+        "embedding_identity": embedding_identity,
+        "index_stats": {
+            "num_items": int(len(item_ids)),
+            "embedding_dim": int(vectors.shape[1]),
+            "faiss_ntotal": int(index.ntotal),
+        },
+        "input_stats": {
+            "rows_total": input_rows_total,
+            "parse_error_rows": parse_error_rows,
+            "non_object_rows": non_object_rows,
+            "rows_missing_user_id": rows_missing_user_id,
+            "rows_missing_target_item_id": rows_missing_target_item_id,
+            "rows_invalid_query_item_ids": rows_invalid_query_list,
+        },
+        "filter_stats": {
+            "dropped_target_not_in_index": dropped_target_not_in_index,
+            "dropped_query_contains_target": dropped_query_contains_target,
+            "dropped_query_item_not_in_index": dropped_query_item_not_in_index,
+            "dropped_query_empty_after_clean": dropped_query_empty_after_clean,
+            "dropped_zero_norm_query": dropped_zero_norm_query,
+        },
+        "eval_stats": {
+            "valid_eval_rows": valid_eval_rows,
+            "kept_rate_over_input": (
+                valid_eval_rows / input_rows_total if input_rows_total else 0.0
+            ),
+        },
+        "metrics": metrics,
+    }
+    report_output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    info = {
+        "generated_at_utc": generated_at,
+        "eval_run_id": eval_run_id,
+        "eval_input": {
+            "path": str(eval_input_resolved),
+            "sha256": eval_sha,
+        },
+        "embedding": {
+            "dir": str(embedding_dir.resolve()),
+            "item_ids_path": str(item_ids_input.resolve()),
+            "embeddings_path": str(embeddings_input.resolve()),
+            **embedding_identity,
+        },
+        "retrieval": {
+            "topk": ks,
+            "max_query": args.max_query,
+            "index_type": args.index_type,
+            "hnsw_m": args.hnsw_m,
+            "hnsw_ef_search": args.hnsw_ef_search,
+            "hnsw_ef_construction": args.hnsw_ef_construction,
+            "seed": args.seed,
+        },
+        "outputs": {
+            "run_output_dir": str(run_output_dir.resolve()),
+            "predictions_output": str(predictions_output.resolve()),
+            "report_output": str(report_output.resolve()),
+            "info_output": str(info_output.resolve()),
+        },
+    }
+    info_output.write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

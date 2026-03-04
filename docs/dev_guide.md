@@ -76,7 +76,9 @@ docs/
 - `reports/data_profile/build_eval_report.json`: eval 构建统计
 - `outputs/embeddings/<model_name>/<experiment_id>/<run_id>/item_embeddings.npy`: 按实验配置产出的 item 向量
 - `outputs/index/<model_name>/<experiment_id>/<run_id>/faiss.index`: 按实验配置构建的检索索引
-- `reports/eval/<run_id>.json`: 指标结果
+- `outputs/eval/<eval_run_id>/predictions.jsonl`: 每条 query 的 topK 检索结果
+- `outputs/eval/<eval_run_id>/run_eval_report.json`: 指标结果
+- `outputs/eval/<eval_run_id>/info.json`: 本次评估输入与参数快照
 - `reports/eval/<run_id>.md`: 结果解读与结论
 
 ## 4. 数据源与字段约定
@@ -321,7 +323,7 @@ fusion:
 
 评估脚本路径约定:
 
-- `src/eval/evaluate_retrieval.py`
+- `src/eval/run_eval.py`
 
 ## 9. 实验记录与可复现要求
 

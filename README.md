@@ -7,6 +7,7 @@ Current implemented stages:
 - Data preprocessing (`items.jsonl`, `interactions.jsonl`, `eval.jsonl`)
 - Item embedding generation (local-only model loading)
 - ANN neighbor inspection tool
+- Offline retrieval evaluation (`run_eval.py`)
 - Unit tests for data and embedding core logic
 
 ## Table Of Contents
@@ -46,6 +47,7 @@ reports/data_profile/          # data build reports
 src/data/                      # build_items / build_interactions / build_eval
 src/embedding/                 # embedding generator
 src/retrieval/                 # ANN utilities and neighbor review tool
+src/eval/                      # retrieval evaluation runner
 tests/                         # unit tests
 ```
 
@@ -149,6 +151,51 @@ UV_CACHE_DIR=.uv-cache uv run python src/retrieval/review_item_neighbors.py \
   --index-type hnsw
 ```
 
+### 6) Run retrieval evaluation
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python src/eval/run_eval.py \
+  --eval-input data/processed/eval.jsonl \
+  --embedding-dir outputs/embeddings/BAAI__bge-m3/exp_bge_tac/<run_id> \
+  --output-root outputs/eval \
+  --max-query 200 \
+  --topk 10,50 \
+  --index-type hnsw
+```
+
+Evaluation CLI notes:
+
+- `--embedding-dir` points to one embedding run directory and must contain:
+  - `item_embeddings.npy`
+  - `item_ids.jsonl`
+- `--eval-run-id` is optional; if omitted it uses local timestamp `YYYYMMDDHHMMSS`.
+- `--max-query` is optional:
+  - `0` means evaluate all valid queries
+  - `>0` means evaluate only first N valid queries (recommended for smoke tests)
+- `--index-type`:
+  - `hnsw` recommended for full eval on large datasets
+  - `flat` is exact but much slower at current scale
+
+Output layout per run:
+
+- `outputs/eval/<eval_run_id>/predictions.jsonl`
+  - per-query topK retrieval result with `target_rank`
+- `outputs/eval/<eval_run_id>/run_eval_report.json`
+  - aggregate metrics and filtering stats
+- `outputs/eval/<eval_run_id>/info.json`
+  - run metadata (eval input hash, embedding source, retrieval params, output paths)
+
+Example full eval command (all valid queries):
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python src/eval/run_eval.py \
+  --eval-input data/processed/eval.jsonl \
+  --embedding-dir outputs/embeddings/BAAI__bge-m3/exp_bge_tac/<run_id> \
+  --output-root outputs/eval \
+  --topk 10,50 \
+  --index-type hnsw
+```
+
 ## Experiment Configs
 
 Current configs in `configs/experiments/`:
@@ -194,6 +241,9 @@ Main outputs:
 - `reports/data_profile/build_eval_report.json`
 - `outputs/embeddings/<model>/<experiment_id>/<run_id>/item_embeddings.npy`
 - `outputs/embeddings/<model>/<experiment_id>/<run_id>/item_ids.jsonl`
+- `outputs/eval/<eval_run_id>/predictions.jsonl`
+- `outputs/eval/<eval_run_id>/run_eval_report.json`
+- `outputs/eval/<eval_run_id>/info.json`
 - `outputs/runs/<run_id>/config.json`
 
 Notes:
@@ -210,7 +260,8 @@ UV_CACHE_DIR=.uv-cache uv run python -m unittest \
   tests/test_build_interactions.py \
   tests/test_build_eval.py \
   tests/test_generate_item_embeddings.py \
-  tests/test_ann_utils.py
+  tests/test_ann_utils.py \
+  tests/test_run_eval.py
 ```
 
 ## Troubleshooting
