@@ -33,8 +33,8 @@ class GenerateItemEmbeddingsTests(unittest.TestCase):
             "experiment_id": "exp_test",
             "model": {
                 "name": model_name,
+                "embedding_dim": 16,
                 "max_length": 16,
-                "batch_size": 2,
                 "normalize_embeddings": True,
             },
             "text_views": {
@@ -98,6 +98,17 @@ class GenerateItemEmbeddingsTests(unittest.TestCase):
         b = {"a": 2, "b": 1}
         self.assertEqual(mod.compute_config_hash(a), mod.compute_config_hash(b))
 
+    def test_apply_embedding_dim_truncates_before_normalization_path(self) -> None:
+        pooled = torch.tensor([[3.0, 4.0, 10.0]], dtype=torch.float32)
+        truncated = mod.apply_embedding_dim(pooled, embedding_dim=2)
+        self.assertEqual(list(truncated.shape), [1, 2])
+        self.assertTrue(torch.equal(truncated, torch.tensor([[3.0, 4.0]], dtype=torch.float32)))
+
+    def test_apply_embedding_dim_rejects_too_large_target(self) -> None:
+        pooled = torch.tensor([[1.0, 2.0]], dtype=torch.float32)
+        with self.assertRaisesRegex(ValueError, "exceeds model output dim"):
+            mod.apply_embedding_dim(pooled, embedding_dim=3)
+
     def test_validate_model_name_rejects_path_like_values(self) -> None:
         path_like_values = ["/tmp/model", "./local-model", "../local-model", "~/local-model"]
         for model_name in path_like_values:
@@ -105,6 +116,12 @@ class GenerateItemEmbeddingsTests(unittest.TestCase):
                 cfg = self._minimal_experiment_config(model_name=model_name)
                 with self.assertRaisesRegex(ValueError, "path-like values are not allowed"):
                     mod.validate_experiment_config(cfg)
+
+    def test_validate_config_requires_embedding_dim(self) -> None:
+        cfg = self._minimal_experiment_config(model_name="BAAI/bge-m3")
+        del cfg["model"]["embedding_dim"]
+        with self.assertRaisesRegex(ValueError, "model.embedding_dim"):
+            mod.validate_experiment_config(cfg)
 
     def test_resolve_local_model_ref_uses_fixed_hf_cache_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -134,6 +151,23 @@ class GenerateItemEmbeddingsTests(unittest.TestCase):
             self.assertIn("Local model snapshot not found", message)
             self.assertIn("Please pre-download this model", message)
             self.assertIn(str(cache_root), message)
+
+    def test_is_valid_local_model_dir_accepts_sharded_safetensors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model_dir = Path(tmp_dir)
+            (model_dir / "config.json").write_text("{}", encoding="utf-8")
+            (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+            (model_dir / "model.safetensors.index.json").write_text("{}", encoding="utf-8")
+            (model_dir / "model-00001-of-00002.safetensors").write_text("", encoding="utf-8")
+            self.assertTrue(mod.is_valid_local_model_dir(model_dir))
+
+    def test_is_valid_local_model_dir_rejects_sharded_index_without_shard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model_dir = Path(tmp_dir)
+            (model_dir / "config.json").write_text("{}", encoding="utf-8")
+            (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+            (model_dir / "model.safetensors.index.json").write_text("{}", encoding="utf-8")
+            self.assertFalse(mod.is_valid_local_model_dir(model_dir))
 
 
 if __name__ == "__main__":

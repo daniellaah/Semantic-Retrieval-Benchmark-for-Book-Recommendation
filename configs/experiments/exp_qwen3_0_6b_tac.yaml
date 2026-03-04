@@ -1,9 +1,9 @@
-experiment_id: exp_bge_title_author_categories_v1
+experiment_id: exp_qwen3_0_6b_tac
 
 model:
-  name: BAAI/bge-m3
+  name: Qwen/Qwen3-Embedding-0.6B
+  embedding_dim: 1024
   max_length: 512
-  batch_size: 64
   normalize_embeddings: true
 
 text_views:

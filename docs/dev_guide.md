@@ -219,8 +219,9 @@ CLI 关键参数:
 
 统一推理参数（必须一致）:
 
+- `embedding_dim`（由实验配置 `model.embedding_dim` 指定）
 - `max_length=512`
-- `batch_size=64`（按设备可降）
+- `batch_size=64`（CLI 参数，按设备可调整）
 - `normalize_embeddings=True`
 
 Embedding 输入约定:
@@ -239,8 +240,8 @@ Embedding 输入约定:
 experiment_id: exp_bge_mview_weighted_v1
 model:
   name: BAAI/bge-m3
+  embedding_dim: 1024
   max_length: 512
-  batch_size: 64
   normalize_embeddings: true
 
 text_views:
@@ -335,7 +336,7 @@ fusion:
 
 - 数据版本（文件名 + 修改时间）
 - 模型名与 revision
-- 推理参数（batch、max_length、normalize）
+- 推理参数（batch、embedding_dim、max_length、normalize）
 - 索引参数（类型、topK）
 - 随机种子、设备信息
 - 实验配置信息（`experiment_id`, `experiment_config_path`, `view_ids`, `fusion_method`）

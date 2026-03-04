@@ -81,7 +81,16 @@ def is_valid_local_model_dir(path: Path) -> bool:
     if not path.exists() or not path.is_dir():
         return False
     has_config = (path / "config.json").exists()
-    has_weights = (path / "pytorch_model.bin").exists() or (path / "model.safetensors").exists()
+    has_single_weights = (path / "pytorch_model.bin").exists() or (path / "model.safetensors").exists()
+    has_sharded_safetensors = (
+        (path / "model.safetensors.index.json").exists()
+        and any(path.glob("model-*.safetensors"))
+    )
+    has_sharded_pytorch = (
+        (path / "pytorch_model.bin.index.json").exists()
+        and any(path.glob("pytorch_model-*.bin"))
+    )
+    has_weights = has_single_weights or has_sharded_safetensors or has_sharded_pytorch
     has_tokenizer = (
         (path / "tokenizer.json").exists()
         or (path / "tokenizer_config.json").exists()
@@ -157,11 +166,10 @@ def validate_experiment_config(cfg: dict[str, Any]) -> None:
     if not model_name:
         raise ValueError("Missing 'model.name' in config.")
     validate_model_name(model_name)
+    if int(model_cfg.get("embedding_dim", 0)) <= 0:
+        raise ValueError("'model.embedding_dim' must be > 0.")
     if int(model_cfg.get("max_length", 0)) <= 0:
         raise ValueError("'model.max_length' must be > 0.")
-    if int(model_cfg.get("batch_size", 0)) <= 0:
-        raise ValueError("'model.batch_size' must be > 0.")
-
     text_views_cfg = cfg.get("text_views", {})
     views = text_views_cfg.get("views")
     if not isinstance(views, list) or not views:
@@ -234,14 +242,35 @@ def mean_pool(last_hidden_state: torch.Tensor, attention_mask: torch.Tensor) -> 
     return summed / counts
 
 
+def synchronize_device_for_timing(device: str) -> None:
+    if device == "cuda":
+        torch.cuda.synchronize()
+        return
+    if device == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "synchronize"):
+        torch.mps.synchronize()
+
+
+def apply_embedding_dim(pooled: torch.Tensor, embedding_dim: int) -> torch.Tensor:
+    current_dim = int(pooled.shape[1])
+    if current_dim < embedding_dim:
+        raise ValueError(
+            f"Configured model.embedding_dim={embedding_dim} exceeds model output dim={current_dim}."
+        )
+    if current_dim == embedding_dim:
+        return pooled
+    return pooled[:, :embedding_dim]
+
+
 def encode_text_batch(
     texts: list[str],
     tokenizer: AutoTokenizer,
     model: AutoModel,
     device: str,
     max_length: int,
+    embedding_dim: int,
     normalize_embeddings: bool,
 ) -> tuple[torch.Tensor, int, float]:
+    synchronize_device_for_timing(device)
     start = time.perf_counter()
     encoded = tokenizer(
         texts,
@@ -255,8 +284,10 @@ def encode_text_batch(
     with torch.no_grad():
         outputs = model(**encoded)
         pooled = mean_pool(outputs.last_hidden_state, encoded["attention_mask"])
+        pooled = apply_embedding_dim(pooled, embedding_dim=embedding_dim)
         if normalize_embeddings:
             pooled = F.normalize(pooled, p=2, dim=1)
+    synchronize_device_for_timing(device)
     elapsed = time.perf_counter() - start
     return pooled.detach().cpu().to(torch.float32), token_count, elapsed
 
@@ -358,6 +389,12 @@ def parse_args() -> argparse.Namespace:
         help="Random seed.",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Encoding batch size.",
+    )
+    parser.add_argument(
         "--save-view-embeddings",
         action="store_true",
         help="If set, save each input view embedding matrix alongside fused output.",
@@ -371,12 +408,24 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.max_items is not None and args.max_items <= 0:
         parser.error("--max-items must be > 0 when provided.")
+    if args.batch_size <= 0:
+        parser.error("--batch-size must be > 0.")
     return args
 
 
 def generate_run_id_local() -> str:
     now_local = datetime.now()
     return now_local.strftime("%Y%m%d%H%M%S")
+
+
+def format_eta(seconds: float) -> str:
+    if seconds < 0:
+        seconds = 0.0
+    total = int(seconds)
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    secs = total % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 def main() -> None:
@@ -391,8 +440,9 @@ def main() -> None:
 
     model_cfg: dict[str, Any] = exp_cfg["model"]
     model_name = str(model_cfg["name"])
+    embedding_dim_config = int(model_cfg["embedding_dim"])
     max_length = int(model_cfg["max_length"])
-    batch_size = int(model_cfg["batch_size"])
+    batch_size = int(args.batch_size)
     normalize_embeddings = bool(model_cfg.get("normalize_embeddings", True))
 
     fusion_cfg: dict[str, Any] = exp_cfg["fusion"]
@@ -461,6 +511,8 @@ def main() -> None:
     total_tokens_processed = 0
     total_encode_seconds = 0.0
     progress_bar_width = 30
+    progress_last_print = 0.0
+    progress_print_interval_seconds = 0.5
 
     with item_ids_path.open("w", encoding="utf-8") as id_f:
         for batch in batched_items(items_input, batch_size=batch_size, max_items=args.max_items):
@@ -481,6 +533,7 @@ def main() -> None:
                     model=model,
                     device=resolved_device,
                     max_length=max_length,
+                    embedding_dim=embedding_dim_config,
                     normalize_embeddings=normalize_embeddings,
                 )
                 batch_view_embeddings[view_id] = encoded_batch
@@ -494,6 +547,11 @@ def main() -> None:
 
             if embedding_memmap is None:
                 embedding_dim = int(fused_np.shape[1])
+                if embedding_dim != embedding_dim_config:
+                    raise ValueError(
+                        f"Output dim mismatch: config model.embedding_dim={embedding_dim_config} "
+                        f"but fused dim={embedding_dim}."
+                    )
                 embedding_memmap = open_memmap(
                     embedding_path,
                     mode="w+",
@@ -528,13 +586,21 @@ def main() -> None:
                 bar = "=" * progress_bar_width
             else:
                 bar = "=" * filled + ">" + "." * (progress_bar_width - filled - 1)
-            print(
-                "\r"
-                f"[embed] [{bar}] {offset}/{total_items} "
-                f"{instant_tps:.2f} tokens/s",
-                end="",
-                flush=True,
-            )
+            now = time.perf_counter()
+            should_print = offset == total_items or (now - progress_last_print) >= progress_print_interval_seconds
+            if should_print:
+                remaining_items = max(total_items - offset, 0)
+                items_per_second = batch_size_actual / max(batch_encode_seconds, 1e-9)
+                eta_seconds = remaining_items / max(items_per_second, 1e-9)
+                print(
+                    "\r"
+                    f"[embed] [{bar}] {offset}/{total_items} "
+                    f"{instant_tps:.2f} token/s "
+                    f"ETA {format_eta(eta_seconds)}",
+                    end="",
+                    flush=True,
+                )
+                progress_last_print = now
 
     print()
 
@@ -556,6 +622,8 @@ def main() -> None:
         "save_view_embeddings": args.save_view_embeddings,
         "local_model_ref": local_model_ref,
         "allow_device_fallback": args.allow_device_fallback,
+        "batch_size": batch_size,
+        "embedding_dim": embedding_dim_config,
     }
     config_hash = compute_config_hash(config_hash_payload)
 
@@ -572,6 +640,7 @@ def main() -> None:
             "local_model_ref": local_model_ref,
             "max_length": max_length,
             "batch_size": batch_size,
+            "embedding_dim": embedding_dim_config,
             "normalize_embeddings": normalize_embeddings,
         },
         "device": {

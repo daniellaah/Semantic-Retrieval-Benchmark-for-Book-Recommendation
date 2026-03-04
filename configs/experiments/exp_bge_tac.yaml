@@ -1,4 +1,4 @@
-experiment_id: exp_bge_text_concat_v1
+experiment_id: exp_bge_tac
 
 model:
   name: BAAI/bge-m3
@@ -8,17 +8,14 @@ model:
 
 text_views:
   views:
-    - view_id: view_all
-      fields: [title, subtitle, author, description, features, categories]
+    - view_id: view_tac
+      fields: [title, author, categories]
       template: |
         Title: {title}
-        Subtitle: {subtitle}
         Author: {author}
-        Description: {description}
-        Features: {features}
         Categories: {categories}
 
 fusion:
   method: identity
-  input_views: [view_all]
+  input_views: [view_tac]
   normalization: false
