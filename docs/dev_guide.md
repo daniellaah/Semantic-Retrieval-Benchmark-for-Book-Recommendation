@@ -347,7 +347,12 @@ fusion:
 - 候选集合: `items.jsonl` 全量 item（可在报告中附加采样实验）。
 - 命中定义: ground-truth item 出现在 topK 结果中。
 - 显著性: 主报告先给点估计；如需论文级别结论，再补 bootstrap 置信区间。
-- query 向量构造: 对 `query_item_ids` 对应 item embedding 做均值，再做 L2 归一化。
+- query 检索模式:
+  - `pooling`: 对 `query_item_ids` 对应 item embedding 按 `--query-pooling` 聚合（`mean`/`max`/`last`，默认 `mean`；`last` 表示仅使用最后一个 query item），再做 L2 归一化后检索一次。
+  - `merging`: 对每个 query item 单独检索 `--per-query-topk`，合并去重后融合排序，再截断为评估 `topK`。
+    - `--merge-fusion=max`: 同一 item 取跨 query 的最大加权分数。
+    - `--merge-fusion=rrf`: 按 `sum_j w_j * 1/(rrf_k + rank_j)` 计算融合分。
+    - `w_j` 由 `--recency-weighting` 控制（`none`/`linear`/`exp`）；query 顺序按 `oldest -> newest`，越新权重越大。
 - 检索结果会排除 `query_item_ids` 自身，避免历史泄漏。
 
 `run_eval.py` 关键参数:
@@ -358,6 +363,13 @@ fusion:
 - `--eval-run-id`（可选；不传时使用本机时间 `YYYYMMDDHHMMSS`）
 - `--max-query`（默认 `0`，表示不限制；`>0` 表示仅评估前 N 条有效 query）
 - `--topk`（默认 `10,50`）
+- `--query-pooling`（`mean`/`max`/`last`，默认 `mean`）
+- `--query-retrieval-mode`（`pooling`/`merging`，默认 `pooling`）
+- `--per-query-topk`（默认 `20`，仅 `--query-retrieval-mode=merging` 时生效）
+- `--merge-fusion`（`max`/`rrf`，默认 `max`，仅 `merging` 时生效）
+- `--rrf-k`（默认 `60`，仅 `--merge-fusion=rrf` 时生效）
+- `--recency-weighting`（`none`/`linear`/`exp`，默认 `none`，仅 `merging` 时生效）
+- `--recency-alpha`（默认 `1.0`，仅 `--recency-weighting=exp` 时生效）
 - `--index-type`（`flat`/`hnsw`，默认 `flat`）
 
 评估脚本路径约定:

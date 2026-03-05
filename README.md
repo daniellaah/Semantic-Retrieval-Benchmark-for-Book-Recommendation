@@ -286,11 +286,26 @@ Important behavior:
 | `--eval-run-id` | timestamp | Optional eval run id (`YYYYMMDDHHMMSS` if omitted). |
 | `--max-query` | `0` | `0` = all valid queries; `>0` = first N valid queries. |
 | `--topk` | `10,50` | Comma-separated K list. |
+| `--query-pooling` | `mean` | Pooling over `query_item_ids`: `mean`, `max`, or `last` (use the last query item only). |
+| `--query-retrieval-mode` | `pooling` | `pooling` (single pooled query) or `merging` (retrieve per query then dedup+merge). |
+| `--per-query-topk` | `20` | Per-query retrieval size, used when `--query-retrieval-mode=merging`. |
+| `--merge-fusion` | `max` | Merge scoring in `merging` mode: `max` or `rrf`. |
+| `--rrf-k` | `60` | RRF constant, used when `--merge-fusion=rrf`. |
+| `--recency-weighting` | `none` | Query-history recency weighting in `merging`: `none`, `linear`, or `exp`. |
+| `--recency-alpha` | `1.0` | Exponential decay alpha, used when `--recency-weighting=exp`. |
 | `--index-type` | `flat` | `flat` or `hnsw`. |
 | `--hnsw-m` | `32` | HNSW M (when `index-type=hnsw`). |
 | `--hnsw-ef-search` | `64` | HNSW efSearch (when `index-type=hnsw`). |
 | `--hnsw-ef-construction` | `200` | HNSW efConstruction (when `index-type=hnsw`). |
 | `--seed` | `42` | RNG seed for deterministic metadata/runtime behavior. |
+
+Merging notes:
+
+- `merging` always retrieves per query item directly; `--query-pooling` is only used by `pooling` mode.
+- `max` fusion uses the maximum weighted score across per-query candidates.
+- `rrf` fusion uses weighted Reciprocal Rank Fusion:
+  - `score(item) = sum_j w_j * 1 / (rrf_k + rank_j(item))`
+  - recency weights `w_j` follow query order `oldest -> newest`.
 
 ### `src/retrieval/review_item_neighbors.py`
 

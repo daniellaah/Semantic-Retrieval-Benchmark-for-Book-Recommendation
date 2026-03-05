@@ -9,12 +9,53 @@ from pathlib import Path
 
 import numpy as np
 
+from src.eval.run_eval import build_query_recency_weights, merge_predictions_rrf
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "src/eval/run_eval.py"
 
 
 class RunEvalTests(unittest.TestCase):
+    def test_build_query_recency_weights(self) -> None:
+        weights_none = build_query_recency_weights(3, "none", 1.0)
+        self.assertAlmostEqual(sum(weights_none), 1.0)
+        self.assertEqual(weights_none, [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0])
+
+        weights_linear = build_query_recency_weights(3, "linear", 1.0)
+        self.assertAlmostEqual(sum(weights_linear), 1.0)
+        self.assertTrue(weights_linear[0] < weights_linear[1] < weights_linear[2])
+
+        weights_exp = build_query_recency_weights(3, "exp", 1.0)
+        self.assertAlmostEqual(sum(weights_exp), 1.0)
+        self.assertTrue(weights_exp[0] < weights_exp[1] < weights_exp[2])
+
+    def test_merge_predictions_rrf_respects_recency_weights(self) -> None:
+        per_query_predictions = [
+            [
+                {"rank": 1, "item_id": "A", "score": 0.9},
+                {"rank": 2, "item_id": "B", "score": 0.8},
+            ],
+            [
+                {"rank": 1, "item_id": "B", "score": 0.95},
+                {"rank": 2, "item_id": "C", "score": 0.85},
+            ],
+        ]
+        no_recency = merge_predictions_rrf(
+            per_query_predictions=per_query_predictions,
+            query_weights=build_query_recency_weights(2, "none", 1.0),
+            rrf_k=1,
+        )
+        linear_recency = merge_predictions_rrf(
+            per_query_predictions=per_query_predictions,
+            query_weights=build_query_recency_weights(2, "linear", 1.0),
+            rrf_k=1,
+        )
+        self.assertEqual(no_recency[0]["item_id"], "B")
+        self.assertEqual(no_recency[1]["item_id"], "A")
+        self.assertEqual(linear_recency[0]["item_id"], "B")
+        self.assertEqual(linear_recency[1]["item_id"], "C")
+
     def test_run_eval_stable_and_no_leakage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -189,6 +230,235 @@ class RunEvalTests(unittest.TestCase):
             self.assertEqual(report["eval_stats"]["valid_eval_rows"], 1)
             self.assertEqual(report["config"]["max_query"], 1)
 
+    def test_query_pooling_max_changes_ranking(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir.mkdir(parents=True, exist_ok=True)
+            item_ids_path = embedding_dir / "item_ids.jsonl"
+            embeddings_path = embedding_dir / "item_embeddings.npy"
+            eval_input_path = tmp_path / "eval.jsonl"
+            output_root = tmp_path / "outputs" / "eval"
+
+            with item_ids_path.open("w", encoding="utf-8") as f:
+                for item_id in ["A", "B", "C", "D"]:
+                    f.write(json.dumps({"item_id": item_id}, ensure_ascii=False) + "\n")
+
+            # A + C query history is crafted so mean pooling favors B, max pooling favors D.
+            np.save(
+                embeddings_path,
+                np.array(
+                    [
+                        [1.0, -0.2],  # A (query)
+                        [0.99, 0.1],  # B
+                        [0.2, 1.0],  # C (query)
+                        [0.4, 0.9],  # D (target)
+                    ],
+                    dtype=np.float32,
+                ),
+            )
+
+            with eval_input_path.open("w", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(
+                        {"user_id": "U1", "query_item_ids": ["A", "C"], "target_item_id": "D"},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+            run_mean = self._run_script(
+                eval_input=eval_input_path,
+                embedding_dir=embedding_dir,
+                output_root=output_root,
+                eval_run_id="run_mean",
+                query_pooling="mean",
+            )
+            run_max = self._run_script(
+                eval_input=eval_input_path,
+                embedding_dir=embedding_dir,
+                output_root=output_root,
+                eval_run_id="run_max",
+                query_pooling="max",
+            )
+
+            mean_pred = json.loads(run_mean["predictions"].read_text(encoding="utf-8").strip())
+            max_pred = json.loads(run_max["predictions"].read_text(encoding="utf-8").strip())
+            self.assertEqual(mean_pred["target_rank"], 2)
+            self.assertEqual(max_pred["target_rank"], 1)
+
+            mean_report = json.loads(run_mean["report"].read_text(encoding="utf-8"))
+            max_report = json.loads(run_max["report"].read_text(encoding="utf-8"))
+            self.assertEqual(mean_report["config"]["query_pooling"], "mean")
+            self.assertEqual(max_report["config"]["query_pooling"], "max")
+
+    def test_query_pooling_last_uses_last_query_item(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir.mkdir(parents=True, exist_ok=True)
+            item_ids_path = embedding_dir / "item_ids.jsonl"
+            embeddings_path = embedding_dir / "item_embeddings.npy"
+            eval_input_path = tmp_path / "eval.jsonl"
+            output_root = tmp_path / "outputs" / "eval"
+
+            with item_ids_path.open("w", encoding="utf-8") as f:
+                for item_id in ["A", "B", "C", "D"]:
+                    f.write(json.dumps({"item_id": item_id}, ensure_ascii=False) + "\n")
+
+            np.save(
+                embeddings_path,
+                np.array(
+                    [
+                        [1.0, -0.2],  # A (query, not last)
+                        [0.99, 0.1],  # B
+                        [0.2, 1.0],  # C (query, last)
+                        [0.4, 0.9],  # D (target)
+                    ],
+                    dtype=np.float32,
+                ),
+            )
+
+            with eval_input_path.open("w", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(
+                        {"user_id": "U1", "query_item_ids": ["A", "C"], "target_item_id": "D"},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+            run_last = self._run_script(
+                eval_input=eval_input_path,
+                embedding_dir=embedding_dir,
+                output_root=output_root,
+                eval_run_id="run_last",
+                query_pooling="last",
+            )
+
+            last_pred = json.loads(run_last["predictions"].read_text(encoding="utf-8").strip())
+            self.assertEqual(last_pred["target_rank"], 1)
+
+            last_report = json.loads(run_last["report"].read_text(encoding="utf-8"))
+            self.assertEqual(last_report["config"]["query_pooling"], "last")
+
+    def test_query_retrieval_mode_merging_dedups_and_reranks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir.mkdir(parents=True, exist_ok=True)
+            item_ids_path = embedding_dir / "item_ids.jsonl"
+            embeddings_path = embedding_dir / "item_embeddings.npy"
+            eval_input_path = tmp_path / "eval.jsonl"
+            output_root = tmp_path / "outputs" / "eval"
+
+            with item_ids_path.open("w", encoding="utf-8") as f:
+                for item_id in ["A", "B", "C", "D", "E"]:
+                    f.write(json.dumps({"item_id": item_id}, ensure_ascii=False) + "\n")
+
+            np.save(
+                embeddings_path,
+                np.array(
+                    [
+                        [1.0, 0.0],  # A (query)
+                        [0.8, 0.2],  # B
+                        [0.0, 1.0],  # C (query)
+                        [0.05, 0.99],  # D (target)
+                        [0.7, 0.7],  # E (can appear in both query retrieval lists)
+                    ],
+                    dtype=np.float32,
+                ),
+            )
+
+            with eval_input_path.open("w", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(
+                        {"user_id": "U1", "query_item_ids": ["A", "C"], "target_item_id": "D"},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+            run = self._run_script(
+                eval_input=eval_input_path,
+                embedding_dir=embedding_dir,
+                output_root=output_root,
+                eval_run_id="run_merging",
+                query_retrieval_mode="merging",
+                per_query_topk=2,
+            )
+            pred_row = json.loads(run["predictions"].read_text(encoding="utf-8").strip())
+            self.assertEqual(pred_row["target_rank"], 1)
+
+            pred_item_ids = [x["item_id"] for x in pred_row["predictions"]]
+            self.assertEqual(len(pred_item_ids), len(set(pred_item_ids)))
+
+            report = json.loads(run["report"].read_text(encoding="utf-8"))
+            self.assertEqual(report["config"]["query_retrieval_mode"], "merging")
+            self.assertEqual(report["config"]["per_query_topk"], 2)
+
+    def test_query_retrieval_mode_merging_rrf_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir.mkdir(parents=True, exist_ok=True)
+            item_ids_path = embedding_dir / "item_ids.jsonl"
+            embeddings_path = embedding_dir / "item_embeddings.npy"
+            eval_input_path = tmp_path / "eval.jsonl"
+            output_root = tmp_path / "outputs" / "eval"
+
+            with item_ids_path.open("w", encoding="utf-8") as f:
+                for item_id in ["A", "B", "C", "D"]:
+                    f.write(json.dumps({"item_id": item_id}, ensure_ascii=False) + "\n")
+
+            np.save(
+                embeddings_path,
+                np.array(
+                    [
+                        [1.0, 0.0],  # A (query)
+                        [0.9, 0.1],  # B
+                        [0.0, 1.0],  # C (query)
+                        [0.1, 0.95],  # D (target)
+                    ],
+                    dtype=np.float32,
+                ),
+            )
+
+            with eval_input_path.open("w", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(
+                        {"user_id": "U1", "query_item_ids": ["A", "C"], "target_item_id": "D"},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+            run = self._run_script(
+                eval_input=eval_input_path,
+                embedding_dir=embedding_dir,
+                output_root=output_root,
+                eval_run_id="run_merging_rrf",
+                query_retrieval_mode="merging",
+                per_query_topk=2,
+                merge_fusion="rrf",
+                rrf_k=30,
+                recency_weighting="exp",
+                recency_alpha=1.5,
+            )
+
+            report = json.loads(run["report"].read_text(encoding="utf-8"))
+            self.assertEqual(report["config"]["query_retrieval_mode"], "merging")
+            self.assertEqual(report["config"]["merge_fusion"], "rrf")
+            self.assertEqual(report["config"]["rrf_k"], 30)
+            self.assertEqual(report["config"]["recency_weighting"], "exp")
+            self.assertAlmostEqual(report["config"]["recency_alpha"], 1.5)
+
+            info = json.loads(run["info"].read_text(encoding="utf-8"))
+            self.assertEqual(info["retrieval"]["merge_fusion"], "rrf")
+            self.assertEqual(info["retrieval"]["rrf_k"], 30)
+            self.assertEqual(info["retrieval"]["recency_weighting"], "exp")
+            self.assertAlmostEqual(info["retrieval"]["recency_alpha"], 1.5)
+
     def _run_script(
         self,
         eval_input: Path,
@@ -196,6 +466,13 @@ class RunEvalTests(unittest.TestCase):
         output_root: Path,
         eval_run_id: str,
         max_query: int = 0,
+        query_pooling: str = "mean",
+        query_retrieval_mode: str = "pooling",
+        per_query_topk: int = 20,
+        merge_fusion: str = "max",
+        rrf_k: int = 60,
+        recency_weighting: str = "none",
+        recency_alpha: float = 1.0,
     ) -> dict[str, Path]:
         cmd = [
             sys.executable,
@@ -210,6 +487,20 @@ class RunEvalTests(unittest.TestCase):
             str(eval_run_id),
             "--topk",
             "1,2",
+            "--query-pooling",
+            query_pooling,
+            "--query-retrieval-mode",
+            query_retrieval_mode,
+            "--per-query-topk",
+            str(per_query_topk),
+            "--merge-fusion",
+            merge_fusion,
+            "--rrf-k",
+            str(rrf_k),
+            "--recency-weighting",
+            recency_weighting,
+            "--recency-alpha",
+            str(recency_alpha),
             "--index-type",
             "flat",
             "--seed",

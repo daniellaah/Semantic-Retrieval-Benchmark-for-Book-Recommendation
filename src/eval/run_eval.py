@@ -109,6 +109,48 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated metric K list, e.g. '10,50'.",
     )
     parser.add_argument(
+        "--query-pooling",
+        choices=["mean", "max", "last"],
+        default="mean",
+        help="How to pool multi-item query history into one query embedding.",
+    )
+    parser.add_argument(
+        "--query-retrieval-mode",
+        choices=["pooling", "merging"],
+        default="pooling",
+        help="Query retrieval mode: one pooled query vs per-query retrieval + merge.",
+    )
+    parser.add_argument(
+        "--per-query-topk",
+        type=int,
+        default=20,
+        help="Per-query topK used only when --query-retrieval-mode=merging.",
+    )
+    parser.add_argument(
+        "--merge-fusion",
+        choices=["max", "rrf"],
+        default="max",
+        help="Fusion method used only when --query-retrieval-mode=merging.",
+    )
+    parser.add_argument(
+        "--rrf-k",
+        type=int,
+        default=60,
+        help="RRF constant K used when --merge-fusion=rrf.",
+    )
+    parser.add_argument(
+        "--recency-weighting",
+        choices=["none", "linear", "exp"],
+        default="none",
+        help="Recency weighting strategy over query history in merging mode.",
+    )
+    parser.add_argument(
+        "--recency-alpha",
+        type=float,
+        default=1.0,
+        help="Exponential decay alpha used when --recency-weighting=exp.",
+    )
+    parser.add_argument(
         "--index-type",
         choices=["flat", "hnsw"],
         default="flat",
@@ -141,13 +183,28 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.max_query < 0:
         parser.error("--max-query must be >= 0")
+    if args.per_query_topk <= 0:
+        parser.error("--per-query-topk must be > 0")
+    if args.rrf_k <= 0:
+        parser.error("--rrf-k must be > 0")
+    if args.recency_alpha < 0:
+        parser.error("--recency-alpha must be >= 0")
 
     args.topk_list = parse_topk_list(args.topk)
     return args
 
 
-def make_query_vector(vectors: np.ndarray, query_rows: list[int]) -> np.ndarray:
-    query_vec = vectors[np.array(query_rows, dtype=np.int64)].mean(axis=0, dtype=np.float32)
+def make_query_vector(vectors: np.ndarray, query_rows: list[int], pooling: str) -> np.ndarray:
+    query_vectors = vectors[np.array(query_rows, dtype=np.int64)]
+    if pooling == "mean":
+        query_vec = query_vectors.mean(axis=0, dtype=np.float32)
+    elif pooling == "max":
+        query_vec = query_vectors.max(axis=0)
+    elif pooling == "last":
+        query_vec = query_vectors[-1]
+    else:
+        raise ValueError(f"Unsupported query pooling method: {pooling}")
+    query_vec = np.asarray(query_vec, dtype=np.float32)
     norm = float(np.linalg.norm(query_vec))
     if norm <= 1e-12:
         raise ValueError("zero-norm query vector")
@@ -198,6 +255,95 @@ def search_topk_excluding_rows(
         search_k = min(ntotal, search_k * 2)
 
     return neighbors
+
+
+def build_query_recency_weights(
+    num_queries: int,
+    recency_weighting: str,
+    recency_alpha: float,
+) -> list[float]:
+    if num_queries <= 0:
+        raise ValueError("num_queries must be > 0")
+    if recency_weighting == "none":
+        raw_weights = [1.0] * num_queries
+    elif recency_weighting == "linear":
+        # Query order is assumed oldest -> newest; newer queries get larger weights.
+        raw_weights = [float(i + 1) for i in range(num_queries)]
+    elif recency_weighting == "exp":
+        raw_weights = [
+            math.exp(-recency_alpha * float((num_queries - 1) - i)) for i in range(num_queries)
+        ]
+    else:
+        raise ValueError(f"Unsupported recency weighting: {recency_weighting}")
+
+    total = float(sum(raw_weights))
+    if total <= 1e-12:
+        raise ValueError("invalid recency weights")
+    return [float(w / total) for w in raw_weights]
+
+
+def make_single_query_vector(vectors: np.ndarray, query_row: int) -> np.ndarray:
+    query_vec = np.asarray(vectors[query_row], dtype=np.float32)
+    norm = float(np.linalg.norm(query_vec))
+    if norm <= 1e-12:
+        raise ValueError("zero-norm single query vector")
+    return (query_vec / norm).astype(np.float32, copy=False)
+
+
+def _sorted_predictions_from_score_map(score_by_item_id: dict[str, float]) -> list[dict[str, Any]]:
+    merged = sorted(score_by_item_id.items(), key=lambda x: (-x[1], x[0]))
+    return [
+        {
+            "rank": idx + 1,
+            "item_id": item_id,
+            "score": float(score),
+        }
+        for idx, (item_id, score) in enumerate(merged)
+    ]
+
+
+def merge_predictions_max_score(
+    per_query_predictions: list[list[dict[str, Any]]],
+    query_weights: list[float],
+) -> list[dict[str, Any]]:
+    if len(per_query_predictions) != len(query_weights):
+        raise ValueError("per_query_predictions and query_weights length mismatch")
+    score_by_item_id: dict[str, float] = {}
+    for preds, query_weight in zip(per_query_predictions, query_weights):
+        for pred in preds:
+            item_id = normalize_text(pred.get("item_id"))
+            if not item_id:
+                continue
+            score = float(query_weight) * float(pred["score"])
+            prev = score_by_item_id.get(item_id)
+            if prev is None or score > prev:
+                score_by_item_id[item_id] = score
+
+    return _sorted_predictions_from_score_map(score_by_item_id)
+
+
+def merge_predictions_rrf(
+    per_query_predictions: list[list[dict[str, Any]]],
+    query_weights: list[float],
+    rrf_k: int,
+) -> list[dict[str, Any]]:
+    if rrf_k <= 0:
+        raise ValueError("rrf_k must be > 0")
+    if len(per_query_predictions) != len(query_weights):
+        raise ValueError("per_query_predictions and query_weights length mismatch")
+    score_by_item_id: dict[str, float] = {}
+    for preds, query_weight in zip(per_query_predictions, query_weights):
+        for pred in preds:
+            item_id = normalize_text(pred.get("item_id"))
+            if not item_id:
+                continue
+            rank = int(pred["rank"])
+            if rank <= 0:
+                continue
+            score = float(query_weight) * (1.0 / float(rrf_k + rank))
+            score_by_item_id[item_id] = score_by_item_id.get(item_id, 0.0) + score
+
+    return _sorted_predictions_from_score_map(score_by_item_id)
 
 
 def find_rank(predictions: list[dict[str, Any]], target_item_id: str) -> int | None:
@@ -349,19 +495,49 @@ def main() -> None:
                 dropped_query_empty_after_clean += 1
                 continue
 
+            excluded_rows = set(query_rows)
             try:
-                query_vec = make_query_vector(vectors, query_rows)
+                if args.query_retrieval_mode == "pooling":
+                    query_vec = make_query_vector(vectors, query_rows, args.query_pooling)
+                    predictions = search_topk_excluding_rows(
+                        index=index,
+                        item_ids=item_ids,
+                        query_vec=query_vec,
+                        excluded_rows=excluded_rows,
+                        top_k=max_k,
+                    )
+                else:
+                    query_weights = build_query_recency_weights(
+                        num_queries=len(query_rows),
+                        recency_weighting=args.recency_weighting,
+                        recency_alpha=args.recency_alpha,
+                    )
+                    per_query_predictions: list[list[dict[str, Any]]] = []
+                    for query_row in query_rows:
+                        single_query_vec = make_single_query_vector(vectors, query_row)
+                        per_query_predictions.append(
+                            search_topk_excluding_rows(
+                                index=index,
+                                item_ids=item_ids,
+                                query_vec=single_query_vec,
+                                excluded_rows=excluded_rows,
+                                top_k=args.per_query_topk,
+                            )
+                        )
+                    if args.merge_fusion == "max":
+                        predictions = merge_predictions_max_score(
+                            per_query_predictions=per_query_predictions,
+                            query_weights=query_weights,
+                        )[:max_k]
+                    else:
+                        predictions = merge_predictions_rrf(
+                            per_query_predictions=per_query_predictions,
+                            query_weights=query_weights,
+                            rrf_k=args.rrf_k,
+                        )[:max_k]
             except ValueError:
                 dropped_zero_norm_query += 1
                 continue
-
-            predictions = search_topk_excluding_rows(
-                index=index,
-                item_ids=item_ids,
-                query_vec=query_vec,
-                excluded_rows=set(query_rows),
-                top_k=max_k,
-            )
 
             target_rank = find_rank(predictions, target_item_id)
             valid_eval_rows += 1
@@ -418,6 +594,13 @@ def main() -> None:
             "report_output": str(report_output.resolve()),
             "info_output": str(info_output.resolve()),
             "topk": ks,
+            "query_pooling": args.query_pooling,
+            "query_retrieval_mode": args.query_retrieval_mode,
+            "per_query_topk": args.per_query_topk,
+            "merge_fusion": args.merge_fusion,
+            "rrf_k": args.rrf_k,
+            "recency_weighting": args.recency_weighting,
+            "recency_alpha": args.recency_alpha,
             "max_query": args.max_query,
             "index_type": args.index_type,
             "hnsw_m": args.hnsw_m,
@@ -470,6 +653,13 @@ def main() -> None:
         },
         "retrieval": {
             "topk": ks,
+            "query_pooling": args.query_pooling,
+            "query_retrieval_mode": args.query_retrieval_mode,
+            "per_query_topk": args.per_query_topk,
+            "merge_fusion": args.merge_fusion,
+            "rrf_k": args.rrf_k,
+            "recency_weighting": args.recency_weighting,
+            "recency_alpha": args.recency_alpha,
             "max_query": args.max_query,
             "index_type": args.index_type,
             "hnsw_m": args.hnsw_m,
