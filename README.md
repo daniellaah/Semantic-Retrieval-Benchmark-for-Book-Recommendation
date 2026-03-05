@@ -123,9 +123,7 @@ UV_CACHE_DIR=.uv-cache uv run python src/data/build_eval.py \
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python src/data/build_items_subset_from_eval.py \
   --eval-input data/processed/eval.jsonl \
-  --items-input data/processed/items.jsonl \
-  --output data/processed/items_eval_subset.jsonl \
-  --report reports/data_profile/build_items_subset_from_eval_report.json
+  --items-input data/processed/items.jsonl
 ```
 
 Use subset for faster embedding iteration by passing it to `--items-input` in step 5.
@@ -251,8 +249,8 @@ Notes:
 |---|---|---|
 | `--eval-input` | `data/processed/eval.jsonl` | Eval set containing query/target ids. |
 | `--items-input` | `data/processed/items.jsonl` | Full items file. |
-| `--output` | `data/processed/items_eval_subset.jsonl` | Reduced items file. |
-| `--report` | `reports/data_profile/build_items_subset_from_eval_report.json` | Build report output path. |
+| `--output` | auto | Reduced items file. If omitted: `data/processed/items_subset_<eval_input_stem>.jsonl`. |
+| `--report` | auto | Build report output path. If omitted: `reports/data_profile/build_items_subset_report_from_<eval_input_stem>.json`. |
 
 ### `src/embedding/generate_item_embeddings.py`
 

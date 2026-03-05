@@ -113,6 +113,66 @@ class BuildItemsSubsetFromEvalTests(unittest.TestCase):
             self.assertEqual(report["output_stats"]["missing_item_ids_from_items"], 0)
             self.assertAlmostEqual(report["output_stats"]["coverage_over_wanted_item_ids"], 1.0)
 
+    def test_default_output_follows_eval_input_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            eval_input = tmp_path / "data" / "processed" / "eval_u6_i5_q5.jsonl"
+            items_input = tmp_path / "data" / "processed" / "items.jsonl"
+            expected_output = tmp_path / "data" / "processed" / "items_subset_eval_u6_i5_q5.jsonl"
+            expected_report = (
+                tmp_path
+                / "reports"
+                / "data_profile"
+                / "build_items_subset_report_from_eval_u6_i5_q5.json"
+            )
+
+            eval_input.parent.mkdir(parents=True, exist_ok=True)
+            eval_input.write_text(
+                json.dumps(
+                    {
+                        "user_id": "U1",
+                        "query_item_ids": ["A"],
+                        "target_item_id": "B",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            items_input.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"item_id": "A", "title": "A"}, ensure_ascii=False),
+                        json.dumps({"item_id": "B", "title": "B"}, ensure_ascii=False),
+                        json.dumps({"item_id": "C", "title": "C"}, ensure_ascii=False),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            cmd = [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--eval-input",
+                str(Path("data/processed/eval_u6_i5_q5.jsonl")),
+                "--items-input",
+                str(Path("data/processed/items.jsonl")),
+            ]
+            subprocess.run(
+                cmd,
+                cwd=tmp_path,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertTrue(expected_output.exists())
+            self.assertTrue(expected_report.exists())
+            out_rows = [json.loads(x) for x in expected_output.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([x["item_id"] for x in out_rows], ["A", "B"])
+
 
 if __name__ == "__main__":
     unittest.main()

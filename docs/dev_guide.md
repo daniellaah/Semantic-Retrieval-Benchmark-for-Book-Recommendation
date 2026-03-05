@@ -75,7 +75,7 @@ docs/
 - `reports/data_profile/build_items_report.json`: items 构建统计
 - `reports/data_profile/build_interactions_report.json`: interactions 构建统计
 - `reports/data_profile/build_eval_report_<queries_output_stem>.json`: eval 构建统计（默认命名规则）
-- `reports/data_profile/build_items_subset_from_eval_report.json`: eval 驱动的 items 子集构建统计
+- `reports/data_profile/build_items_subset_report_from_<eval_input_stem>.json`: eval 驱动的 items 子集构建统计（默认命名规则）
 - `outputs/embeddings/<model_name>/<run_id>/item_embeddings.npy`: 按实验配置产出的 item 向量
 - `outputs/embeddings/<model_name>/<run_id>/item_ids.jsonl`: 与 embedding 行对齐的 item 主键
 - `outputs/embeddings/<model_name>/<run_id>/config.json`: embedding 运行快照（含实验参数与配置哈希）
@@ -226,8 +226,8 @@ CLI 关键参数:
 
 输出:
 
-- `data/processed/items_eval_subset.jsonl`
-- `reports/data_profile/build_items_subset_from_eval_report.json`
+- `data/processed/items_subset_<eval_input_stem>.jsonl`（`--output` 不传时自动命名）
+- `reports/data_profile/build_items_subset_report_from_<eval_input_stem>.json`（`--report` 不传时自动命名）
 
 规则:
 

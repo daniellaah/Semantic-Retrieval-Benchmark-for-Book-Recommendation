@@ -20,6 +20,20 @@ def ensure_parent_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def default_output_for_eval_input(eval_input: str) -> str:
+    stem = normalize_text(Path(eval_input).stem)
+    if not stem:
+        stem = "eval"
+    return str(Path("data/processed") / f"items_subset_{stem}.jsonl")
+
+
+def default_report_for_eval_input(eval_input: str) -> str:
+    stem = normalize_text(Path(eval_input).stem)
+    if not stem:
+        stem = "eval"
+    return str(Path("reports/data_profile") / f"build_items_subset_report_from_{stem}.json")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build items subset from eval query/target item ids."
@@ -36,15 +50,26 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        default="data/processed/items_eval_subset.jsonl",
-        help="Output subset items jsonl path.",
+        default="",
+        help=(
+            "Output subset items jsonl path. "
+            "If omitted, auto uses data/processed/items_subset_<eval_input_stem>.jsonl"
+        ),
     )
     parser.add_argument(
         "--report",
-        default="reports/data_profile/build_items_subset_from_eval_report.json",
-        help="Output report json path.",
+        default="",
+        help=(
+            "Output report json path. "
+            "If omitted, auto uses reports/data_profile/build_items_subset_report_from_<eval_input_stem>.json"
+        ),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not normalize_text(args.output):
+        args.output = default_output_for_eval_input(args.eval_input)
+    if not normalize_text(args.report):
+        args.report = default_report_for_eval_input(args.eval_input)
+    return args
 
 
 def collect_wanted_item_ids(eval_input: Path) -> tuple[set[str], dict[str, int]]:
