@@ -59,7 +59,7 @@ class RunEvalTests(unittest.TestCase):
     def test_run_eval_stable_and_no_leakage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "20260304000000"
             embedding_dir.mkdir(parents=True, exist_ok=True)
             item_ids_path = embedding_dir / "item_ids.jsonl"
             embeddings_path = embedding_dir / "item_embeddings.npy"
@@ -82,6 +82,18 @@ class RunEvalTests(unittest.TestCase):
                 dtype=np.float32,
             )
             np.save(embeddings_path, embeddings)
+            (embedding_dir / "config.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "20260304000000",
+                        "experiment_id": "exp_bge_tac",
+                        "model": {"name": "BAAI/bge-m3"},
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
             eval_rows = [
                 {
@@ -131,6 +143,7 @@ class RunEvalTests(unittest.TestCase):
             info = json.loads(run1["info"].read_text(encoding="utf-8"))
             self.assertEqual(info["eval_run_id"], "run_1")
             self.assertEqual(info["embedding"]["model_name_guess"], "BAAI/bge-m3")
+            self.assertEqual(info["embedding"]["experiment_id"], "exp_bge_tac")
 
     def test_drops_rows_with_missing_query_item(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -178,7 +191,7 @@ class RunEvalTests(unittest.TestCase):
     def test_max_query_limits_number_of_evaluated_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "20260304000000"
             embedding_dir.mkdir(parents=True, exist_ok=True)
             item_ids_path = embedding_dir / "item_ids.jsonl"
             embeddings_path = embedding_dir / "item_embeddings.npy"
@@ -233,7 +246,7 @@ class RunEvalTests(unittest.TestCase):
     def test_query_pooling_max_changes_ranking(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "20260304000000"
             embedding_dir.mkdir(parents=True, exist_ok=True)
             item_ids_path = embedding_dir / "item_ids.jsonl"
             embeddings_path = embedding_dir / "item_embeddings.npy"
@@ -295,7 +308,7 @@ class RunEvalTests(unittest.TestCase):
     def test_query_pooling_last_uses_last_query_item(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "20260304000000"
             embedding_dir.mkdir(parents=True, exist_ok=True)
             item_ids_path = embedding_dir / "item_ids.jsonl"
             embeddings_path = embedding_dir / "item_embeddings.npy"
@@ -345,7 +358,7 @@ class RunEvalTests(unittest.TestCase):
     def test_query_retrieval_mode_merging_dedups_and_reranks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "20260304000000"
             embedding_dir.mkdir(parents=True, exist_ok=True)
             item_ids_path = embedding_dir / "item_ids.jsonl"
             embeddings_path = embedding_dir / "item_embeddings.npy"
@@ -400,7 +413,7 @@ class RunEvalTests(unittest.TestCase):
     def test_query_retrieval_mode_merging_rrf_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "20260304000000"
             embedding_dir.mkdir(parents=True, exist_ok=True)
             item_ids_path = embedding_dir / "item_ids.jsonl"
             embeddings_path = embedding_dir / "item_embeddings.npy"
@@ -462,7 +475,7 @@ class RunEvalTests(unittest.TestCase):
     def test_query_history_n_uses_last_n_items(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "20260304000000"
             embedding_dir.mkdir(parents=True, exist_ok=True)
             item_ids_path = embedding_dir / "item_ids.jsonl"
             embeddings_path = embedding_dir / "item_embeddings.npy"

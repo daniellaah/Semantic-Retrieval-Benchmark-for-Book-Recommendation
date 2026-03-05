@@ -53,19 +53,43 @@ def file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def infer_embedding_identity(embedding_dir: Path) -> dict[str, str]:
-    model_dir_name = ""
-    model_name_guess = ""
-    experiment_id = ""
-    embedding_run_id = ""
+def load_embedding_run_config(embedding_dir: Path) -> dict[str, Any] | None:
+    config_path = embedding_dir / "config.json"
+    if not config_path.exists():
+        return None
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    return raw
 
-    if embedding_dir.name:
-        embedding_run_id = embedding_dir.name
-    if embedding_dir.parent and embedding_dir.parent.name:
-        experiment_id = embedding_dir.parent.name
-    if embedding_dir.parent and embedding_dir.parent.parent and embedding_dir.parent.parent.name:
-        model_dir_name = embedding_dir.parent.parent.name
-        model_name_guess = model_dir_name.replace("__", "/")
+
+def infer_embedding_identity(embedding_dir: Path) -> dict[str, str]:
+    embedding_run_id = normalize_text(embedding_dir.name)
+    model_dir_name = normalize_text(embedding_dir.parent.name if embedding_dir.parent else "")
+    model_name_guess = model_dir_name.replace("__", "/") if model_dir_name else ""
+    experiment_id = ""
+
+    run_cfg = load_embedding_run_config(embedding_dir)
+    if run_cfg:
+        experiment_id = normalize_text(run_cfg.get("experiment_id"))
+        model_cfg = run_cfg.get("model")
+        if isinstance(model_cfg, dict):
+            model_name = normalize_text(model_cfg.get("name"))
+            if model_name:
+                model_name_guess = model_name
+                model_dir_name = model_name.replace("/", "__")
+
+    # Backward compatibility for legacy layout: embeddings/<model>/<experiment>/<run_id>
+    if not run_cfg and embedding_dir.parent and embedding_dir.parent.parent:
+        maybe_experiment = normalize_text(embedding_dir.parent.name)
+        maybe_model_dir = normalize_text(embedding_dir.parent.parent.name)
+        if maybe_experiment.startswith("exp_") and maybe_model_dir:
+            experiment_id = maybe_experiment
+            model_dir_name = maybe_model_dir
+            model_name_guess = maybe_model_dir.replace("__", "/")
 
     return {
         "model_dir_name": model_dir_name,

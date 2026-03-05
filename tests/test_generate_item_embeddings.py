@@ -98,6 +98,10 @@ class GenerateItemEmbeddingsTests(unittest.TestCase):
         b = {"a": 2, "b": 1}
         self.assertEqual(mod.compute_config_hash(a), mod.compute_config_hash(b))
 
+    def test_generate_run_id_local_uses_milliseconds(self) -> None:
+        run_id = mod.generate_run_id_local()
+        self.assertRegex(run_id, r"^\d{17}$")
+
     def test_apply_embedding_dim_truncates_before_normalization_path(self) -> None:
         pooled = torch.tensor([[3.0, 4.0, 10.0]], dtype=torch.float32)
         truncated = mod.apply_embedding_dim(pooled, embedding_dim=2)

@@ -371,11 +371,6 @@ def parse_args() -> argparse.Namespace:
         help="Root output directory for embedding artifacts.",
     )
     parser.add_argument(
-        "--runs-root",
-        default="outputs/runs",
-        help="Root output directory for run config snapshots.",
-    )
-    parser.add_argument(
         "--device",
         default="mps",
         help="Requested device: mps/cuda/cpu.",
@@ -418,7 +413,8 @@ def parse_args() -> argparse.Namespace:
 
 def generate_run_id_local() -> str:
     now_local = datetime.now()
-    return now_local.strftime("%Y%m%d%H%M%S")
+    # Include milliseconds to reduce collision probability in model/<run_id> layout.
+    return now_local.strftime("%Y%m%d%H%M%S%f")[:-3]
 
 
 def format_eta(seconds: float) -> str:
@@ -436,7 +432,6 @@ def main() -> None:
     items_input = Path(args.items_input)
     config_path = Path(args.experiment_config)
     output_root = Path(args.output_root)
-    runs_root = Path(args.runs_root)
 
     exp_cfg = parse_experiment_config(config_path)
     validate_experiment_config(exp_cfg)
@@ -464,7 +459,7 @@ def main() -> None:
     model_dir = sanitize_model_name_for_path(model_name)
     experiment_id = str(exp_cfg["experiment_id"])
 
-    run_output_dir = output_root / model_dir / experiment_id / run_id
+    run_output_dir = output_root / model_dir / run_id
     embedding_path = run_output_dir / "item_embeddings.npy"
     item_ids_path = run_output_dir / "item_ids.jsonl"
 
@@ -634,7 +629,7 @@ def main() -> None:
     }
     config_hash = compute_config_hash(config_hash_payload)
 
-    run_snapshot_path = runs_root / run_id / "config.json"
+    run_snapshot_path = run_output_dir / "config.json"
     ensure_parent_dir(run_snapshot_path)
     run_snapshot = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
