@@ -286,6 +286,7 @@ Important behavior:
 | `--eval-run-id` | timestamp | Optional eval run id (`YYYYMMDDHHMMSS` if omitted). |
 | `--max-query` | `0` | `0` = all valid queries; `>0` = first N valid queries. |
 | `--topk` | `10,50` | Comma-separated K list. |
+| `--query-history-n` | `0` | Number of most recent `query_item_ids` used in eval; `0` = use all history. |
 | `--query-pooling` | `mean` | Pooling over `query_item_ids`: `mean`, `max`, or `last` (use the last query item only). |
 | `--query-retrieval-mode` | `pooling` | `pooling` (single pooled query) or `merging` (retrieve per query then dedup+merge). |
 | `--per-query-topk` | `20` | Per-query retrieval size, used when `--query-retrieval-mode=merging`. |
@@ -301,6 +302,7 @@ Important behavior:
 
 Merging notes:
 
+- `--query-history-n` is applied first (keeps last `N` history items), then retrieval runs on that truncated list.
 - `merging` always retrieves per query item directly; `--query-pooling` is only used by `pooling` mode.
 - `max` fusion uses the maximum weighted score across per-query candidates.
 - `rrf` fusion uses weighted Reciprocal Rank Fusion:

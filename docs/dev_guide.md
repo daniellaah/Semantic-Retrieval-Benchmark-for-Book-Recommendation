@@ -348,8 +348,9 @@ fusion:
 - 命中定义: ground-truth item 出现在 topK 结果中。
 - 显著性: 主报告先给点估计；如需论文级别结论，再补 bootstrap 置信区间。
 - query 检索模式:
-  - `pooling`: 对 `query_item_ids` 对应 item embedding 按 `--query-pooling` 聚合（`mean`/`max`/`last`，默认 `mean`；`last` 表示仅使用最后一个 query item），再做 L2 归一化后检索一次。
-  - `merging`: 对每个 query item 单独检索 `--per-query-topk`，合并去重后融合排序，再截断为评估 `topK`。
+  - 先按 `--query-history-n` 截断 query 历史（保留最近 `N` 个；`0` 表示全量）。
+  - `pooling`: 对截断后的 `query_item_ids` 对应 item embedding 按 `--query-pooling` 聚合（`mean`/`max`/`last`，默认 `mean`；`last` 表示仅使用最后一个 query item），再做 L2 归一化后检索一次。
+  - `merging`: 对截断后的每个 query item 单独检索 `--per-query-topk`，合并去重后融合排序，再截断为评估 `topK`。
     - `--merge-fusion=max`: 同一 item 取跨 query 的最大加权分数。
     - `--merge-fusion=rrf`: 按 `sum_j w_j * 1/(rrf_k + rank_j)` 计算融合分。
     - `w_j` 由 `--recency-weighting` 控制（`none`/`linear`/`exp`）；query 顺序按 `oldest -> newest`，越新权重越大。
@@ -363,6 +364,7 @@ fusion:
 - `--eval-run-id`（可选；不传时使用本机时间 `YYYYMMDDHHMMSS`）
 - `--max-query`（默认 `0`，表示不限制；`>0` 表示仅评估前 N 条有效 query）
 - `--topk`（默认 `10,50`）
+- `--query-history-n`（默认 `0`；仅使用最近 N 个 query history，`0` 表示使用全部）
 - `--query-pooling`（`mean`/`max`/`last`，默认 `mean`）
 - `--query-retrieval-mode`（`pooling`/`merging`，默认 `pooling`）
 - `--per-query-topk`（默认 `20`，仅 `--query-retrieval-mode=merging` 时生效）

@@ -459,6 +459,70 @@ class RunEvalTests(unittest.TestCase):
             self.assertEqual(info["retrieval"]["recency_weighting"], "exp")
             self.assertAlmostEqual(info["retrieval"]["recency_alpha"], 1.5)
 
+    def test_query_history_n_uses_last_n_items(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            embedding_dir = tmp_path / "emb" / "BAAI__bge-m3" / "exp_bge_tac" / "20260304000000"
+            embedding_dir.mkdir(parents=True, exist_ok=True)
+            item_ids_path = embedding_dir / "item_ids.jsonl"
+            embeddings_path = embedding_dir / "item_embeddings.npy"
+            eval_input_path = tmp_path / "eval.jsonl"
+            output_root = tmp_path / "outputs" / "eval"
+
+            with item_ids_path.open("w", encoding="utf-8") as f:
+                for item_id in ["A", "B", "C", "D", "E"]:
+                    f.write(json.dumps({"item_id": item_id}, ensure_ascii=False) + "\n")
+
+            np.save(
+                embeddings_path,
+                np.array(
+                    [
+                        [1.0, 0.0],  # A (old query)
+                        [0.8, 0.2],  # B (query)
+                        [0.0, 1.0],  # C (latest query)
+                        [0.45, 0.89],  # D (target)
+                        [0.95, 0.1],  # E (competitor)
+                    ],
+                    dtype=np.float32,
+                ),
+            )
+
+            with eval_input_path.open("w", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(
+                        {"user_id": "U1", "query_item_ids": ["A", "B", "C"], "target_item_id": "D"},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+            run_all = self._run_script(
+                eval_input=eval_input_path,
+                embedding_dir=embedding_dir,
+                output_root=output_root,
+                eval_run_id="run_history_all",
+                query_pooling="mean",
+                query_history_n=0,
+            )
+            run_last2 = self._run_script(
+                eval_input=eval_input_path,
+                embedding_dir=embedding_dir,
+                output_root=output_root,
+                eval_run_id="run_history_last2",
+                query_pooling="mean",
+                query_history_n=2,
+            )
+
+            pred_all = json.loads(run_all["predictions"].read_text(encoding="utf-8").strip())
+            pred_last2 = json.loads(run_last2["predictions"].read_text(encoding="utf-8").strip())
+
+            self.assertEqual(pred_all["target_rank"], 2)
+            self.assertEqual(pred_last2["target_rank"], 1)
+            self.assertEqual(pred_last2["query_item_ids"], ["B", "C"])
+
+            report_last2 = json.loads(run_last2["report"].read_text(encoding="utf-8"))
+            self.assertEqual(report_last2["config"]["query_history_n"], 2)
+
     def _run_script(
         self,
         eval_input: Path,
@@ -466,6 +530,7 @@ class RunEvalTests(unittest.TestCase):
         output_root: Path,
         eval_run_id: str,
         max_query: int = 0,
+        query_history_n: int = 0,
         query_pooling: str = "mean",
         query_retrieval_mode: str = "pooling",
         per_query_topk: int = 20,
@@ -487,6 +552,8 @@ class RunEvalTests(unittest.TestCase):
             str(eval_run_id),
             "--topk",
             "1,2",
+            "--query-history-n",
+            str(query_history_n),
             "--query-pooling",
             query_pooling,
             "--query-retrieval-mode",

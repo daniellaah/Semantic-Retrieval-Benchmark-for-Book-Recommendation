@@ -109,6 +109,12 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated metric K list, e.g. '10,50'.",
     )
     parser.add_argument(
+        "--query-history-n",
+        type=int,
+        default=0,
+        help="Number of most recent query history items to use; 0 means use all.",
+    )
+    parser.add_argument(
         "--query-pooling",
         choices=["mean", "max", "last"],
         default="mean",
@@ -183,6 +189,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.max_query < 0:
         parser.error("--max-query must be >= 0")
+    if args.query_history_n < 0:
+        parser.error("--query-history-n must be >= 0")
     if args.per_query_topk <= 0:
         parser.error("--per-query-topk must be > 0")
     if args.rrf_k <= 0:
@@ -468,10 +476,15 @@ def main() -> None:
                 seen_query_item_ids.add(item_id)
                 cleaned_query_item_ids.append(item_id)
 
-            if not cleaned_query_item_ids:
+            if args.query_history_n > 0:
+                effective_query_item_ids = cleaned_query_item_ids[-args.query_history_n :]
+            else:
+                effective_query_item_ids = cleaned_query_item_ids
+
+            if not effective_query_item_ids:
                 dropped_query_empty_after_clean += 1
                 continue
-            if target_item_id in seen_query_item_ids:
+            if target_item_id in set(effective_query_item_ids):
                 dropped_query_contains_target += 1
                 continue
 
@@ -482,7 +495,7 @@ def main() -> None:
 
             query_rows: list[int] = []
             missing_query_item = False
-            for query_item_id in cleaned_query_item_ids:
+            for query_item_id in effective_query_item_ids:
                 query_row = item_id_to_row.get(query_item_id)
                 if query_row is None:
                     missing_query_item = True
@@ -552,7 +565,7 @@ def main() -> None:
                 json.dumps(
                     {
                         "user_id": user_id,
-                        "query_item_ids": cleaned_query_item_ids,
+                        "query_item_ids": effective_query_item_ids,
                         "target_item_id": target_item_id,
                         "target_rank": target_rank,
                         "predictions": predictions,
@@ -594,6 +607,7 @@ def main() -> None:
             "report_output": str(report_output.resolve()),
             "info_output": str(info_output.resolve()),
             "topk": ks,
+            "query_history_n": args.query_history_n,
             "query_pooling": args.query_pooling,
             "query_retrieval_mode": args.query_retrieval_mode,
             "per_query_topk": args.per_query_topk,
@@ -653,6 +667,7 @@ def main() -> None:
         },
         "retrieval": {
             "topk": ks,
+            "query_history_n": args.query_history_n,
             "query_pooling": args.query_pooling,
             "query_retrieval_mode": args.query_retrieval_mode,
             "per_query_topk": args.per_query_topk,
