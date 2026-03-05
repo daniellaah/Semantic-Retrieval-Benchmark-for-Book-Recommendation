@@ -89,6 +89,48 @@ class BuildEvalTests(unittest.TestCase):
             self.assertGreaterEqual(report_obj["kcore"]["iterations"], 1)
             self.assertEqual(report_obj["positive_stats"]["samples_post_filter"], 0)
 
+    def test_default_report_output_follows_queries_output_stem(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            interactions_path = tmp_path / "interactions.jsonl"
+            queries_output = tmp_path / "eval_u6_i5_q5.jsonl"
+            expected_report = tmp_path / "reports" / "data_profile" / "build_eval_report_eval_u6_i5_q5.json"
+
+            rows = [
+                {"user_id": "U1", "item_id": "I1", "rating": 5, "timestamp": 1},
+                {"user_id": "U1", "item_id": "I2", "rating": 5, "timestamp": 2},
+            ]
+            interactions_path.write_text(
+                "\n".join(json.dumps(r) for r in rows) + "\n",
+                encoding="utf-8",
+            )
+
+            cmd = [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--interactions-input",
+                str(interactions_path),
+                "--queries-output",
+                str(queries_output),
+                "--query-history-n",
+                "1",
+            ]
+            subprocess.run(
+                cmd,
+                cwd=tmp_path,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertTrue(expected_report.exists())
+            report = json.loads(expected_report.read_text(encoding="utf-8"))
+            self.assertEqual(
+                report["config"]["report_output"],
+                str(Path("reports/data_profile/build_eval_report_eval_u6_i5_q5.json")),
+            )
+
     def _run_script(
         self,
         interactions_path: Path,

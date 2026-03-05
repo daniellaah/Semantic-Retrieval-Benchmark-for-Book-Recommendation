@@ -47,6 +47,14 @@ def ensure_parent_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def default_report_output_for_queries(queries_output: str) -> str:
+    queries_path = Path(queries_output)
+    stem = normalize_text(queries_path.stem)
+    if not stem:
+        stem = "eval"
+    return str(Path("reports/data_profile") / f"build_eval_report_{stem}.json")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build eval query set from interactions.")
     parser.add_argument(
@@ -61,8 +69,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--report-output",
-        default="reports/data_profile/build_eval_report.json",
-        help="Output build report json path.",
+        default="",
+        help=(
+            "Output build report json path. "
+            "If omitted, auto uses reports/data_profile/build_eval_report_<queries_output_stem>.json"
+        ),
     )
     parser.add_argument(
         "--rating-threshold",
@@ -101,6 +112,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--min-item-pos must be >= 1")
     if args.query_history_n < 1:
         parser.error("--query-history-n must be >= 1")
+    if not normalize_text(args.report_output):
+        args.report_output = default_report_output_for_queries(args.queries_output)
     return args
 
 
