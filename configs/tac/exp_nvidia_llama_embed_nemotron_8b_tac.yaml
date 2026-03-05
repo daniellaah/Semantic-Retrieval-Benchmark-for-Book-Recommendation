@@ -2,7 +2,7 @@ experiment_id: exp_nvidia_llama_embed_nemotron_8b_tac
 
 model:
   name: nvidia/llama-embed-nemotron-8b
-  embedding_dim: 4096
+  embedding_dim: [4096]
   max_length: 512
   trust_remote_code: true
   normalize_embeddings: true

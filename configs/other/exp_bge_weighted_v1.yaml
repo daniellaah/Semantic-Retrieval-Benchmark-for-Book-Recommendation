@@ -2,7 +2,7 @@ experiment_id: exp_bge_weighted_v1
 
 model:
   name: BAAI/bge-m3
-  embedding_dim: 1024
+  embedding_dim: [1024]
   max_length: 512
   normalize_embeddings: true
 

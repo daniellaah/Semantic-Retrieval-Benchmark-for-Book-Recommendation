@@ -2,7 +2,7 @@ experiment_id: exp_multilingual_e5_large_instruct_tac
 
 model:
   name: intfloat/multilingual-e5-large-instruct
-  embedding_dim: 1024
+  embedding_dim: [1024]
   max_length: 512
   normalize_embeddings: true
 

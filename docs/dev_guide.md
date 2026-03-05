@@ -76,7 +76,7 @@ docs/
 - `reports/data_profile/build_interactions_report.json`: interactions 构建统计
 - `reports/data_profile/build_eval_report_<queries_output_stem>.json`: eval 构建统计（默认命名规则）
 - `reports/data_profile/build_items_subset_report_from_<eval_input_stem>.json`: eval 驱动的 items 子集构建统计（默认命名规则）
-- `outputs/embeddings/<model_name>/<run_id>/item_embeddings.npy`: 按实验配置产出的 item 向量
+- `outputs/embeddings/<model_name>/<run_id>/item_embeddings_<dim>.npy`: 按实验配置产出的 item 向量（可多维）
 - `outputs/embeddings/<model_name>/<run_id>/item_ids.jsonl`: 与 embedding 行对齐的 item 主键
 - `outputs/embeddings/<model_name>/<run_id>/config.json`: embedding 运行快照（含实验参数与配置哈希）
 - `outputs/eval/<eval_run_id>/predictions.jsonl`: 每条 query 的 topK 检索结果
@@ -249,7 +249,7 @@ CLI 关键参数:
 
 统一推理参数（必须一致）:
 
-- `embedding_dim`（由实验配置 `model.embedding_dim` 指定）
+- `embedding_dim`（由实验配置 `model.embedding_dim` 数组指定，可一次产出多维）
 - `max_length=512`
 - `batch_size=64`（CLI 参数，按设备可调整）
 - `normalize_embeddings=True`
@@ -271,7 +271,7 @@ Embedding 输入约定:
 experiment_id: exp_bge_mview_weighted_v1
 model:
   name: BAAI/bge-m3
-  embedding_dim: 1024
+  embedding_dim: [1024]
   max_length: 512
   normalize_embeddings: true
 
@@ -361,7 +361,8 @@ fusion:
 `run_eval.py` 关键参数:
 
 - `--eval-input`（默认 `data/processed/eval.jsonl`）
-- `--embedding-dir`（必填，目录下必须包含 `item_embeddings.npy` 与 `item_ids.jsonl`）
+- `--embedding-dir`（必填，目录下必须包含 `item_embeddings_<dim>.npy` 与 `item_ids.jsonl`）
+- `--embedding-dim`（默认 `max`；可传具体维度、`max` 或 `all`）
 - `--output-root`（默认 `outputs/eval`）
 - `--eval-run-id`（可选；不传时使用本机时间 `YYYYMMDDHHMMSS`）
 - `--max-query`（默认 `0`，表示不限制；`>0` 表示仅评估前 N 条有效 query）
@@ -385,13 +386,14 @@ fusion:
 每次运行必须生成唯一 `run_id` / `eval_run_id`，并保存:
 
 - embedding 阶段:
-  - `outputs/embeddings/<model_name>/<run_id>/item_embeddings.npy`
+  - `outputs/embeddings/<model_name>/<run_id>/item_embeddings_<dim>.npy`
   - `outputs/embeddings/<model_name>/<run_id>/item_ids.jsonl`
   - `outputs/embeddings/<model_name>/<run_id>/config.json`: embedding 完整配置快照
 - eval 阶段:
   - `outputs/eval/<eval_run_id>/predictions.jsonl`
   - `outputs/eval/<eval_run_id>/run_eval_report.json`
   - `outputs/eval/<eval_run_id>/info.json`
+  - 若 `run_eval.py --embedding-dim all`，则明细写入 `outputs/eval/<eval_run_id>/dim_<dim>/...`，根目录 `run_eval_report.json` 与 `info.json` 为汇总。
 
 embedding `config.json` 至少包含:
 

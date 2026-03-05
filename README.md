@@ -145,6 +145,7 @@ UV_CACHE_DIR=.uv-cache uv run python src/embedding/generate_item_embeddings.py \
 UV_CACHE_DIR=.uv-cache uv run python src/eval/run_eval.py \
   --eval-input data/processed/eval.jsonl \
   --embedding-dir outputs/embeddings/BAAI__bge-m3/<run_id> \
+  --embedding-dim max \
   --output-root outputs/eval \
   --topk 10,50 \
   --index-type hnsw
@@ -164,7 +165,7 @@ experiment_id: exp_bge_weighted_v1
 
 model:
   name: BAAI/bge-m3
-  embedding_dim: 1024
+  embedding_dim: [1024]
   max_length: 512
   normalize_embeddings: true
   # trust_remote_code: false
@@ -192,7 +193,7 @@ fusion:
 |---|---|---|---|
 | `experiment_id` | string | yes | Unique experiment identifier, stored in per-run `config.json`. |
 | `model.name` | string | yes | Hugging Face repo id (`namespace/model`). |
-| `model.embedding_dim` | int | yes | Final embedding dimension (must be <= model output dim). |
+| `model.embedding_dim` | list[int] | yes | Output dims list (strictly increasing, each value must be <= model output dim). |
 | `model.max_length` | int | yes | Token truncation length. |
 | `model.normalize_embeddings` | bool | yes | Normalize each model output embedding before fusion. |
 | `model.trust_remote_code` | bool | no | Needed for models that require custom code. |
@@ -263,7 +264,7 @@ Notes:
 | `--allow-device-fallback` | false | Fallback to CPU if requested device unavailable. |
 | `--seed` | `42` | RNG seed. |
 | `--batch-size` | `64` | Encoding batch size. |
-| `--save-view-embeddings` | false | Also save per-view embeddings (`item_embeddings__<view>.npy`). |
+| `--save-view-embeddings` | false | Also save per-view embeddings (`item_embeddings__<view>_<dim>.npy`). |
 | `--max-items` | none | Debug cap on number of items to encode. |
 
 Important behavior:
@@ -278,7 +279,8 @@ Important behavior:
 | Arg | Default | Description |
 |---|---|---|
 | `--eval-input` | `data/processed/eval.jsonl` | Eval query set input. |
-| `--embedding-dir` | required | Embedding run dir containing `item_embeddings.npy` and `item_ids.jsonl`. |
+| `--embedding-dir` | required | Embedding run dir containing `item_embeddings_<dim>.npy` and `item_ids.jsonl`. |
+| `--embedding-dim` | `max` | Evaluate which embedding dim: integer (`128`, `1024`), `max`, or `all`. |
 | `--output-root` | `outputs/eval` | Output root; writes into `<output_root>/<eval_run_id>/`. |
 | `--eval-run-id` | timestamp | Optional eval run id (`YYYYMMDDHHMMSS` if omitted). |
 | `--max-query` | `0` | `0` = all valid queries; `>0` = first N valid queries. |
@@ -311,7 +313,8 @@ Merging notes:
 | Arg | Default | Description |
 |---|---|---|
 | `--run-output-dir` | none | Embedding run dir (auto resolves embeddings + ids paths). |
-| `--embeddings-path` | none | Explicit path to `item_embeddings.npy` (if not using run dir). |
+| `--embeddings-path` | none | Explicit path to one embedding file (for example `item_embeddings_1024.npy`). |
+| `--embedding-dim` | `max` | Used with `--run-output-dir` when `--embeddings-path` is omitted. |
 | `--item-ids-path` | none | Explicit path to `item_ids.jsonl` (if not using run dir). |
 | `--items-input` | `data/processed/items.jsonl` | Item metadata for readable output. |
 | `--query-item-id` | none | Query item id. |
@@ -336,16 +339,17 @@ Merging notes:
 
 ### Embedding stage
 
-- `outputs/embeddings/<model_dir>/<run_id>/item_embeddings.npy`
+- `outputs/embeddings/<model_dir>/<run_id>/item_embeddings_<dim>.npy`
 - `outputs/embeddings/<model_dir>/<run_id>/item_ids.jsonl`
 - `outputs/embeddings/<model_dir>/<run_id>/config.json` (run snapshot + config hash)
-- Optional: `item_embeddings__<view_id>.npy` when `--save-view-embeddings` is enabled.
+- Optional: `item_embeddings__<view_id>_<dim>.npy` when `--save-view-embeddings` is enabled.
 
 ### Eval stage
 
 - `outputs/eval/<eval_run_id>/predictions.jsonl`
 - `outputs/eval/<eval_run_id>/run_eval_report.json`
 - `outputs/eval/<eval_run_id>/info.json`
+- If `--embedding-dim all`: per-dim files are written under `outputs/eval/<eval_run_id>/dim_<dim>/...`, and root `run_eval_report.json`/`info.json` become summary files.
 
 ## Run Tests
 
