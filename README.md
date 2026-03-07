@@ -11,6 +11,7 @@ This repository provides an end-to-end offline workflow:
 3. Build eval queries (`eval.jsonl`)
 4. Generate item embeddings from experiment config
 5. Evaluate retrieval metrics (Recall/NDCG/MRR)
+6. Plot model-vs-dimension comparisons from eval results
 
 Primary metrics:
 
@@ -41,7 +42,9 @@ src/
     review_item_neighbors.py
   eval/
     run_eval.py
+    plot_eval_results.py
 tests/
+run.sh
 ```
 
 ## Requirements
@@ -58,7 +61,7 @@ uv venv --python 3.10
 
 # Install runtime dependencies (no pyproject.toml required)
 UV_CACHE_DIR=.uv-cache uv pip install --python .venv/bin/python \
-  numpy torch transformers faiss-cpu pyyaml
+  numpy torch transformers faiss-cpu pyyaml matplotlib
 ```
 
 Run all scripts via `uv`:
@@ -149,6 +152,47 @@ UV_CACHE_DIR=.uv-cache uv run python src/eval/run_eval.py \
   --output-root outputs/eval \
   --topk 10,50 \
   --index-type hnsw
+```
+
+### 7) Batch-run eval for all current embeddings
+
+`run.sh` loops over `outputs/embeddings/*/*`, runs `run_eval.py` with:
+
+- `--embedding-dim all`
+- `--query-pooling last`
+- per-run `eval_run_id`
+
+and then automatically calls `plot_eval_results.py` on the generated manifest.
+
+```bash
+./run.sh
+```
+
+Useful overrides:
+
+```bash
+EVAL_INPUT=data/processed/eval_u6_i5_q5.jsonl \
+OUTPUT_ROOT=outputs/eval/last \
+PLOTS_OUTPUT_DIR=outputs/eval/last/plots \
+./run.sh
+```
+
+### 8) Plot eval results
+
+By directory:
+
+```bash
+XDG_CACHE_HOME=.cache MPLCONFIGDIR=.cache/matplotlib UV_CACHE_DIR=.uv-cache \
+uv run python src/eval/plot_eval_results.py \
+  --input outputs/eval/last
+```
+
+By manifest:
+
+```bash
+XDG_CACHE_HOME=.cache MPLCONFIGDIR=.cache/matplotlib UV_CACHE_DIR=.uv-cache \
+uv run python src/eval/plot_eval_results.py \
+  --input outputs/eval/last/<batch_ts>_manifest.txt
 ```
 
 ## Experiment Configs
@@ -308,6 +352,20 @@ Merging notes:
   - `score(item) = sum_j w_j * 1 / (rrf_k + rank_j(item))`
   - recency weights `w_j` follow query order `oldest -> newest`.
 
+### `src/eval/plot_eval_results.py`
+
+| Arg | Default | Description |
+|---|---|---|
+| `--input` | required | Eval results directory, or a manifest file listing eval run dirs / ids. |
+| `--output-dir` | auto | Output dir for plots and summaries. Defaults to `<input>/plots` or `<manifest_stem>_plots`. |
+
+Behavior:
+
+- Reads all available eval reports from the provided directory or manifest.
+- Supports both single-dim eval runs and `--embedding-dim all` multi-dim summaries.
+- Writes `results.csv`, `summary.json`, and one `png` per metric (`recall@10`, `mrr@50`, etc.).
+- Each plot uses embedding dimension on the x-axis and one line per model.
+
 ### `src/retrieval/review_item_neighbors.py`
 
 | Arg | Default | Description |
@@ -350,6 +408,7 @@ Merging notes:
 - `outputs/eval/<eval_run_id>/run_eval_report.json`
 - `outputs/eval/<eval_run_id>/info.json`
 - If `--embedding-dim all`: per-dim files are written under `outputs/eval/<eval_run_id>/dim_<dim>/...`, and root `run_eval_report.json`/`info.json` become summary files.
+- Plot outputs: `results.csv`, `summary.json`, and metric `png` files under a plot output dir such as `outputs/eval/last/plots/`.
 
 ## Run Tests
 
