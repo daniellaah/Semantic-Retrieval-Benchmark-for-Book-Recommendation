@@ -1,6 +1,6 @@
-# TextEmbed-Book-RecSys
+# Benchmarking Open-Source LLM Text Embeddings for Semantic Recommendation Retrieval
 
-Offline evaluation pipeline for embedding-based **semantic retrieval** on Amazon Reviews 2023 (Books).
+An offline benchmark on Amazon Reviews 2023 (Books) for comparing different open-source embedding models and embedding dimensions in next-item retrieval.
 
 ## Overview
 
@@ -20,6 +20,20 @@ Primary metrics:
 - MRR@10, MRR@50, MRR@100
 
 Detailed protocol lives in [`docs/dev_guide.md`](docs/dev_guide.md).
+
+## Models Under Evaluation
+
+Current TAC-style benchmark configs cover:
+
+| Model | Embedding Dimension | MRL Support |
+|---|---:|---|
+| [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) | 1024 | No |
+| [intfloat/multilingual-e5-large-instruct](https://huggingface.co/intfloat/multilingual-e5-large-instruct) | 1024 | No |
+| [mixedbread-ai/mxbai-embed-large-v1](https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1) | 1024 | Yes |
+| [nvidia/llama-embed-nemotron-8b](https://huggingface.co/nvidia/llama-embed-nemotron-8b) | 4096 | No |
+| [Qwen/Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) | 1024 | Yes |
+| [Qwen/Qwen3-Embedding-4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B) | 2560 | Yes |
+| [Qwen/Qwen3-Embedding-8B](https://huggingface.co/Qwen/Qwen3-Embedding-8B) | 4096 | Yes |
 
 ## Repository Layout
 
@@ -233,21 +247,29 @@ Observed conclusions:
 
 ![Recall@50](img/recall_at_50.png)
 
+### Recall@100
+
+![Recall@100](img/recall_at_100.png)
+
 ### MRR@10
 
 ![MRR@10](img/mrr_at_10.png)
+
+### MRR@50
+
+![MRR@100](img/mrr_at_50.png)
+
+### MRR@100
+
+![MRR@100](img/mrr_at_100.png)
 
 ### NDCG@10
 
 ![NDCG@10](img/ndcg_at_10.png)
 
-### Recall@100
+### NDCG@50
 
-![Recall@100](img/recall_at_100.png)
-
-### MRR@100
-
-![MRR@100](img/mrr_at_100.png)
+![NDCG@50](img/ndcg_at_50.png)
 
 ### NDCG@100
 
