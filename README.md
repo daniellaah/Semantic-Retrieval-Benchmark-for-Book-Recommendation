@@ -43,7 +43,7 @@ configs/
   other/                      # concat / weighted multi-view experiments
 docs/
   dev_guide.md
-src/
+scripts/
   data/
     build_items.py
     build_interactions.py
@@ -104,7 +104,7 @@ curl -L --fail "https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/
 ### 1) Build items
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python src/data/build_items.py \
+UV_CACHE_DIR=.uv-cache uv run python scripts/data/build_items.py \
   --input data/raw/meta_Books.jsonl \
   --output data/processed/items.jsonl \
   --report reports/data_profile/build_items_report.json
@@ -113,7 +113,7 @@ UV_CACHE_DIR=.uv-cache uv run python src/data/build_items.py \
 ### 2) Build interactions
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python src/data/build_interactions.py \
+UV_CACHE_DIR=.uv-cache uv run python scripts/data/build_interactions.py \
   --books-input data/raw/Books.jsonl \
   --items-input data/processed/items.jsonl \
   --output data/processed/interactions.jsonl \
@@ -124,7 +124,7 @@ UV_CACHE_DIR=.uv-cache uv run python src/data/build_interactions.py \
 ### 3) Build eval set
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python src/data/build_eval.py \
+UV_CACHE_DIR=.uv-cache uv run python scripts/data/build_eval.py \
   --interactions-input data/processed/interactions.jsonl \
   --queries-output data/processed/eval.jsonl \
   --report-output reports/data_profile/build_eval_report.json \
@@ -138,7 +138,7 @@ UV_CACHE_DIR=.uv-cache uv run python src/data/build_eval.py \
 ### 4) (Optional) Build smaller items subset from eval
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python src/data/build_items_subset_from_eval.py \
+UV_CACHE_DIR=.uv-cache uv run python scripts/data/build_items_subset_from_eval.py \
   --eval-input data/processed/eval.jsonl \
   --items-input data/processed/items.jsonl
 ```
@@ -148,7 +148,7 @@ Use subset for faster embedding iteration by passing it to `--items-input` in st
 ### 5) Generate embeddings
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python src/embedding/generate_item_embeddings.py \
+UV_CACHE_DIR=.uv-cache uv run python scripts/embedding/generate_item_embeddings.py \
   --experiment-config configs/tac/exp_bge_tac.yaml \
   --items-input data/processed/items.jsonl \
   --device mps \
@@ -159,7 +159,7 @@ UV_CACHE_DIR=.uv-cache uv run python src/embedding/generate_item_embeddings.py \
 ### 6) Run retrieval evaluation
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python src/eval/run_eval.py \
+UV_CACHE_DIR=.uv-cache uv run python scripts/eval/run_eval.py \
   --eval-input data/processed/eval.jsonl \
   --embedding-dir outputs/embeddings/BAAI__bge-m3/<run_id> \
   --embedding-dim max \
@@ -194,7 +194,7 @@ By directory:
 
 ```bash
 XDG_CACHE_HOME=.cache MPLCONFIGDIR=.cache/matplotlib UV_CACHE_DIR=.uv-cache \
-uv run python src/eval/plot_eval_results.py \
+uv run python scripts/eval/plot_eval_results.py \
   --input outputs/eval/last \
   --output-dir outputs/eval/last/plots
 ```
@@ -203,7 +203,7 @@ By manifest:
 
 ```bash
 XDG_CACHE_HOME=.cache MPLCONFIGDIR=.cache/matplotlib UV_CACHE_DIR=.uv-cache \
-uv run python src/eval/plot_eval_results.py \
+uv run python scripts/eval/plot_eval_results.py \
   --input outputs/eval/last/<batch_ts>_manifest.txt
 ```
 
@@ -336,7 +336,7 @@ Notes:
 
 ## CLI Reference
 
-### `src/data/build_items.py`
+### `scripts/data/build_items.py`
 
 | Arg | Default | Description |
 |---|---|---|
@@ -345,7 +345,7 @@ Notes:
 | `--report` | `reports/data_profile/build_items_report.json` | Build report output path. |
 | `--tmp-db` | `data/processed/.tmp_build_items.sqlite3` | Temporary sqlite for dedup / merge logic. |
 
-### `src/data/build_interactions.py`
+### `scripts/data/build_interactions.py`
 
 | Arg | Default | Description |
 |---|---|---|
@@ -355,7 +355,7 @@ Notes:
 | `--report` | `reports/data_profile/build_interactions_report.json` | Build report output path. |
 | `--seed` | `42` | Protocol metadata seed (reserved for deterministic config tracking). |
 
-### `src/data/build_eval.py`
+### `scripts/data/build_eval.py`
 
 | Arg | Default | Description |
 |---|---|---|
@@ -368,7 +368,7 @@ Notes:
 | `--query-history-n` | `1` | Number of historical positives used as query context. |
 | `--seed` | `42` | Protocol metadata seed. |
 
-### `src/data/build_items_subset_from_eval.py`
+### `scripts/data/build_items_subset_from_eval.py`
 
 | Arg | Default | Description |
 |---|---|---|
@@ -377,7 +377,7 @@ Notes:
 | `--output` | auto | Reduced items file. If omitted: `data/processed/items_subset_<eval_input_stem>.jsonl`. |
 | `--report` | auto | Build report output path. If omitted: `reports/data_profile/build_items_subset_report_from_<eval_input_stem>.json`. |
 
-### `src/embedding/generate_item_embeddings.py`
+### `scripts/embedding/generate_item_embeddings.py`
 
 | Arg | Default | Description |
 |---|---|---|
@@ -398,7 +398,7 @@ Important behavior:
   - `model_dir` is `model.name` with `/` replaced by `__`.
   - `run_id` is local timestamp with milliseconds (`YYYYMMDDHHMMSSmmm`).
 
-### `src/eval/run_eval.py`
+### `scripts/eval/run_eval.py`
 
 | Arg | Default | Description |
 |---|---|---|
@@ -432,7 +432,7 @@ Merging notes:
   - `score(item) = sum_j w_j * 1 / (rrf_k + rank_j(item))`
   - recency weights `w_j` follow query order `oldest -> newest`.
 
-### `src/eval/plot_eval_results.py`
+### `scripts/eval/plot_eval_results.py`
 
 | Arg | Default | Description |
 |---|---|---|
@@ -446,7 +446,7 @@ Behavior:
 - Writes `results.csv`, `summary.json`, and one `png` per metric (`recall@10`, `mrr@50`, etc.).
 - Each plot uses embedding dimension on the x-axis and one line per model.
 
-### `src/retrieval/review_item_neighbors.py`
+### `scripts/retrieval/review_item_neighbors.py`
 
 | Arg | Default | Description |
 |---|---|---|

@@ -11,7 +11,7 @@ import torch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = REPO_ROOT / "src/embedding/generate_item_embeddings.py"
+MODULE_PATH = REPO_ROOT / "scripts/embedding/generate_item_embeddings.py"
 
 
 def load_module():

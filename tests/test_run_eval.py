@@ -9,11 +9,11 @@ from pathlib import Path
 
 import numpy as np
 
-from src.eval.run_eval import build_query_recency_weights, merge_predictions_rrf
+from scripts.eval.run_eval import build_query_recency_weights, merge_predictions_rrf
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = REPO_ROOT / "src/eval/run_eval.py"
+SCRIPT_PATH = REPO_ROOT / "scripts/eval/run_eval.py"
 
 
 class RunEvalTests(unittest.TestCase):

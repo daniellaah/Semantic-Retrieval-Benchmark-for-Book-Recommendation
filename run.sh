@@ -40,7 +40,7 @@ find "outputs/embeddings" -mindepth 2 -maxdepth 2 -type d | sort | while read -r
   echo "embedding_dir=$embedding_dir"
   echo "eval_run_id=$eval_run_id"
 
-  KMP_DUPLICATE_LIB_OK=TRUE UV_CACHE_DIR=.uv-cache uv run python src/eval/run_eval.py \
+  KMP_DUPLICATE_LIB_OK=TRUE UV_CACHE_DIR=.uv-cache uv run python scripts/eval/run_eval.py \
     --eval-input "$EVAL_INPUT" \
     --embedding-dir "$embedding_dir" \
     --embedding-dim all \

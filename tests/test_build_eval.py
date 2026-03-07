@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = REPO_ROOT / "src/data/build_eval.py"
+SCRIPT_PATH = REPO_ROOT / "scripts/data/build_eval.py"
 
 
 class BuildEvalTests(unittest.TestCase):

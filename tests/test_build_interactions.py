@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = REPO_ROOT / "src/data/build_interactions.py"
+SCRIPT_PATH = REPO_ROOT / "scripts/data/build_interactions.py"
 
 
 class BuildInteractionsTests(unittest.TestCase):

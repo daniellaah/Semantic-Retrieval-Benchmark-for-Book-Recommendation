@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.retrieval.ann_utils import build_faiss_index, load_embeddings, load_item_ids
+from scripts.retrieval.ann_utils import build_faiss_index, load_embeddings, load_item_ids
 
 
 def normalize_text(value: Any) -> str:

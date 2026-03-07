@@ -54,7 +54,7 @@ export UV_CACHE_DIR=.uv-cache
 data/
   raw/
   processed/
-src/
+scripts/
   data/
   embedding/
   retrieval/
@@ -135,7 +135,7 @@ docs/
 
 脚本路径约定:
 
-- `src/data/build_items.py`
+- `scripts/data/build_items.py`
 
 验收标准:
 
@@ -172,7 +172,7 @@ docs/
 
 脚本路径:
 
-- `src/data/build_interactions.py`
+- `scripts/data/build_interactions.py`
 
 ### 6.2 评估集构造（build_eval）
 
@@ -211,7 +211,7 @@ CLI 关键参数:
 
 脚本路径:
 
-- `src/data/build_eval.py`
+- `scripts/data/build_eval.py`
 
 ### 6.3 开发集降规模（build_items_subset_from_eval）
 
@@ -237,7 +237,7 @@ CLI 关键参数:
 
 脚本路径:
 
-- `src/data/build_items_subset_from_eval.py`
+- `scripts/data/build_items_subset_from_eval.py`
 
 ## 7. Embedding 生成与索引构建
 
@@ -331,10 +331,10 @@ fusion:
 
 脚本路径约定:
 
-- `src/embedding/generate_item_embeddings.py`
-- `src/retrieval/ann_utils.py`
-- `src/retrieval/review_item_neighbors.py`
-- `src/eval/run_eval.py`
+- `scripts/embedding/generate_item_embeddings.py`
+- `scripts/retrieval/ann_utils.py`
+- `scripts/retrieval/review_item_neighbors.py`
+- `scripts/eval/run_eval.py`
 
 ## 8. 评估协议
 
@@ -379,7 +379,7 @@ fusion:
 
 评估脚本路径约定:
 
-- `src/eval/run_eval.py`
+- `scripts/eval/run_eval.py`
 
 ## 9. 实验记录与可复现要求
 

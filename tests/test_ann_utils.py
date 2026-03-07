@@ -11,7 +11,7 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = REPO_ROOT / "src/retrieval/ann_utils.py"
+MODULE_PATH = REPO_ROOT / "scripts/retrieval/ann_utils.py"
 
 
 def load_module():
