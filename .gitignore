@@ -1,6 +1,7 @@
 /data/
 /outputs/
 /reports/
+/.cache/
 
 .DS_Store
 __pycache__/
