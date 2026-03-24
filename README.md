@@ -48,6 +48,8 @@ An offline benchmark on Amazon Reviews 2023 (Books) for comparing different open
 </table>
 
 
+![Basline](img/baseline_comparison/recall_comparison.png)
+
 ## Overview
 
 This repository provides an end-to-end offline workflow:
