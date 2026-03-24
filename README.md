@@ -56,8 +56,9 @@ This repository provides an end-to-end offline workflow:
 2. Build cleaned interactions (`interactions.jsonl`)
 3. Build eval queries (`eval.jsonl`)
 4. Generate item embeddings from experiment config
-5. Evaluate retrieval metrics (Recall/NDCG/MRR)
-6. Plot model-vs-dimension comparisons from eval results
+5. Run reusable non-semantic baselines on the same eval set
+6. Evaluate embedding retrieval metrics (Recall/NDCG/MRR)
+7. Plot model-vs-dimension comparisons from eval results
 
 Primary metrics:
 
@@ -90,6 +91,9 @@ configs/
 docs/
   dev_guide.md
 scripts/
+  baselines/
+    baseline_utils.py
+    retrieve_baselines.py
   data/
     build_items.py
     build_interactions.py
@@ -101,6 +105,7 @@ scripts/
     ann_utils.py
     review_item_neighbors.py
   eval/
+    plot_baseline_vs_embedding.py
     run_eval.py
     plot_eval_results.py
 tests/
@@ -185,7 +190,34 @@ UV_CACHE_DIR=.uv-cache uv run python scripts/data/build_items_subset_from_eval.p
 
 Use subset for faster embedding iteration by passing it to `--items-input` in step 5.
 
-### 5) Generate embeddings
+### 5) Run non-semantic baselines
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/baselines/retrieve_baselines.py \
+  --baseline global_popular \
+  --items-input data/processed/items.jsonl \
+  --interactions-input data/processed/interactions.jsonl \
+  --eval-input data/processed/eval.jsonl \
+  --output-root outputs/baselines \
+  --topk 10,50,100 \
+  --seed 42
+```
+
+Supported P0 baselines:
+
+- `random`
+- `global_popular`
+- `category_random`
+- `category_popular`
+
+All baselines:
+
+- consume the same `items.jsonl`, `interactions.jsonl`, and `eval.jsonl`
+- reuse the same `Recall@K` / `MRR@K` / `NDCG@K` definitions as `scripts/eval/run_eval.py`
+- exclude `query_item_ids` from candidates
+- write outputs to `outputs/baselines/<baseline>/<run_id>/`
+
+### 6) Generate embeddings
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python scripts/embedding/generate_item_embeddings.py \
@@ -196,7 +228,7 @@ UV_CACHE_DIR=.uv-cache uv run python scripts/embedding/generate_item_embeddings.
   --batch-size 64
 ```
 
-### 6) Run retrieval evaluation
+### 7) Run retrieval evaluation
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python scripts/eval/run_eval.py \
@@ -208,7 +240,7 @@ UV_CACHE_DIR=.uv-cache uv run python scripts/eval/run_eval.py \
   --index-type hnsw
 ```
 
-### 7) Batch-run eval for all current embeddings
+### 8) Batch-run eval for all current embeddings
 
 `run.sh` loops over `outputs/embeddings/*/*` and runs `run_eval.py` with:
 
@@ -228,15 +260,14 @@ OUTPUT_ROOT=outputs/eval/last \
 ./run.sh
 ```
 
-### 8) Plot eval results
+### 9) Plot eval results
 
 By directory:
 
 ```bash
 XDG_CACHE_HOME=.cache MPLCONFIGDIR=.cache/matplotlib UV_CACHE_DIR=.uv-cache \
 uv run python scripts/eval/plot_eval_results.py \
-  --input outputs/eval/last \
-  --output-dir outputs/eval/last/plots
+  --input outputs/eval/last
 ```
 
 By manifest:
@@ -247,12 +278,25 @@ uv run python scripts/eval/plot_eval_results.py \
   --input outputs/eval/last/<batch_ts>_manifest.txt
 ```
 
+Default output is `img/`.
+
+### 10) Compare one embedding run against baselines
+
+```bash
+XDG_CACHE_HOME=.cache MPLCONFIGDIR=.cache/matplotlib UV_CACHE_DIR=.uv-cache \
+uv run python scripts/eval/plot_baseline_vs_embedding.py \
+  --embedding-eval-dir outputs/eval/last/20260306143956_Qwen__Qwen3-Embedding-8B_20260305170301054/dim_1024 \
+  --baseline-root outputs/baselines
+```
+
+Default output is `img/baseline_comparison/`.
+
 ## Current Benchmark Snapshot
 
 Current comparison plots are generated from:
 
 - Eval root: `outputs/eval/last`
-- Plot dir: `outputs/eval/last/plots`
+- Plot dir: `img/`
 - Eval set: `data/processed/eval_u6_i5_q5.jsonl`
 - Retrieval mode: `pooling`
 - Query pooling: `last`
@@ -278,6 +322,12 @@ Observed conclusions:
 - `nvidia/llama-embed-nemotron-8b` reaches the best `Recall@50` and `Recall@100`, suggesting stronger broader-recall behavior at larger cutoffs.
 - For the Qwen family, performance improves steadily as dimension increases; `Qwen3-Embedding-8B` at `4096` is clearly stronger than the lower-dim variants.
 - `BAAI/bge-m3` is a reasonable baseline, but on the current protocol it trails the stronger multilingual / larger Qwen / Nemotron models.
+
+Baseline comparison should use the same `eval.jsonl` and the same `topK` list. The simplest workflow is:
+
+1. Run one or more baselines into `outputs/baselines/<baseline>/<run_id>/report.json`.
+2. Run embedding eval into `outputs/eval/<eval_run_id>/run_eval_report.json`.
+3. Generate grouped bar charts into `img/baseline_comparison/` with `scripts/eval/plot_baseline_vs_embedding.py`.
 
 ### Recall@10
 
@@ -417,6 +467,31 @@ Notes:
 | `--output` | auto | Reduced items file. If omitted: `data/processed/items_subset_<eval_input_stem>.jsonl`. |
 | `--report` | auto | Build report output path. If omitted: `reports/build_items_subset_report_from_<eval_input_stem>.json`. |
 
+### `scripts/baselines/retrieve_baselines.py`
+
+| Arg | Default | Description |
+|---|---|---|
+| `--baseline` | required | `random`, `global_popular`, `category_random`, or `category_popular`. |
+| `--items-input` | `data/processed/items.jsonl` | Item metadata input used for candidate universe and categories. |
+| `--interactions-input` | `data/processed/interactions.jsonl` | Interaction input used for popularity counting. |
+| `--eval-input` | `data/processed/eval.jsonl` | Eval query set input. |
+| `--output-root` | `outputs/baselines` | Output root; writes into `<output_root>/<baseline>/<run_id>/`. |
+| `--topk` | `10,50` | Comma-separated K list, for example `10,50,100`. |
+| `--max-query` | `0` | `0` = all valid queries; `>0` = first N valid queries. |
+| `--seed` | `42` | RNG seed for deterministic random baselines. |
+| `--rating-threshold` | `4.0` | Popularity counts only interactions with `rating >= threshold`. |
+| `--run-id` | timestamp | Optional run id (`YYYYMMDDHHMMSSmmm` if omitted). |
+
+Behavior:
+
+- `random`: sample uniformly from the full candidate set.
+- `global_popular`: rank all items by positive interaction count.
+- `category_random`: exact-match category filter first, then random fallback if query categories are missing or empty.
+- `category_popular`: exact-match category filter first, then popularity ranking within the matched pool, with global-popular fallback.
+- `category_*` uses the last query item's `categories` string, aligned with the current `query-pooling=last` embedding eval protocol.
+- Category baselines use short prebuilt candidate pools (default size `128`) and fall back to global pools when the category pool is missing or too short.
+- All four baselines exclude `query_item_ids` themselves from predictions.
+
 ### `scripts/embedding/generate_item_embeddings.py`
 
 | Arg | Default | Description |
@@ -477,7 +552,7 @@ Merging notes:
 | Arg | Default | Description |
 |---|---|---|
 | `--input` | required | Eval results directory, or a manifest file listing eval run dirs / ids. |
-| `--output-dir` | auto | Output dir for plots and summaries. Defaults to `<input>/plots` or `<manifest_stem>_plots`. |
+| `--output-dir` | auto | Output dir for plots and summaries. Defaults to `img/`. |
 
 Behavior:
 
@@ -485,6 +560,21 @@ Behavior:
 - Supports both single-dim eval runs and `--embedding-dim all` multi-dim summaries.
 - Writes `results.csv`, `summary.json`, and one `png` per metric (`recall@10`, `mrr@50`, etc.).
 - Each plot uses embedding dimension on the x-axis and one line per model.
+
+### `scripts/eval/plot_baseline_vs_embedding.py`
+
+| Arg | Default | Description |
+|---|---|---|
+| `--embedding-eval-dir` | required | One embedding eval dir containing `run_eval_report.json`. |
+| `--baseline-root` | `outputs/baselines` | Root directory containing baseline runs. |
+| `--baselines` | `category_popular,global_popular,category_random,random` | Ordered baseline list included in the chart. |
+| `--output-dir` | auto | Output dir for grouped bar charts and summaries. Defaults to `img/baseline_comparison/`. |
+
+Behavior:
+
+- Loads the latest `report.json` for each requested baseline.
+- Compares one embedding report against all requested baselines using grouped bar charts.
+- Writes `recall_comparison.png`, `mrr_comparison.png`, `ndcg_comparison.png`, plus `results.csv` and `summary.json`.
 
 ### `scripts/retrieval/review_item_neighbors.py`
 
@@ -515,6 +605,12 @@ Behavior:
 - `data/processed/eval.jsonl`
 - `reports/*.json`
 
+### Baseline stage
+
+- `outputs/baselines/<baseline>/<run_id>/predictions.jsonl`
+- `outputs/baselines/<baseline>/<run_id>/report.json`
+- `outputs/baselines/<baseline>/<run_id>/info.json`
+
 ### Embedding stage
 
 - `outputs/embeddings/<model_dir>/<run_id>/item_embeddings_<dim>.npy`
@@ -528,12 +624,16 @@ Behavior:
 - `outputs/eval/<eval_run_id>/run_eval_report.json`
 - `outputs/eval/<eval_run_id>/info.json`
 - If `--embedding-dim all`: per-dim files are written under `outputs/eval/<eval_run_id>/dim_<dim>/...`, and root `run_eval_report.json`/`info.json` become summary files.
-- Plot outputs: `results.csv`, `summary.json`, and metric `png` files under a plot output dir such as `outputs/eval/last/plots/`.
+- Plot outputs:
+  - `img/*.png`, `img/results.csv`, `img/summary.json` for model-vs-dimension plots
+  - `img/baseline_comparison/*.png`, `img/baseline_comparison/results.csv`, `img/baseline_comparison/summary.json` for embedding-vs-baseline plots
 
 ## Run Tests
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python -m unittest \
+  tests/test_plot_baseline_vs_embedding.py \
+  tests/test_retrieve_baselines.py \
   tests/test_build_interactions.py \
   tests/test_build_eval.py \
   tests/test_build_items_subset_from_eval.py \

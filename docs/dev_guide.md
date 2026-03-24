@@ -6,15 +6,15 @@
 
 本项目用于量化评估不同文本嵌入模型在推荐系统下游任务中的效果。
 
-当前主任务: `Item-to-Item Retrieval`（语义检索）。
+当前主任务: `User-History to Next-Item Retrieval`（离线召回评估）。
 
 核心问题:
 
-- 在同一数据、同一评估协议下，不同 embedding 模型的检索质量谁更好。
+- 在同一数据、同一评估协议下，不同 embedding 模型与非语义 baseline 的召回质量谁更好。
 
 评估成功标准（当前版本）:
 
-- 必须报告: `Recall@10`, `Recall@50`, `NDCG@10`, `NDCG@50`, `MRR@10`, `MRR@50`。
+- 必须报告: `Recall@10`, `Recall@50`, `Recall@100`, `NDCG@10`, `NDCG@50`, `NDCG@100`, `MRR@10`, `MRR@50`, `MRR@100`。
 - 必须固定: 数据切分、候选库、索引类型、检索 topK、随机种子。
 - 每次实验必须输出可追溯的配置与结果文件（见第 9 节）。
 
@@ -31,7 +31,7 @@
 ```bash
 uv python install 3.10
 uv venv --python 3.10
-uv sync --extra dev
+UV_CACHE_DIR=.uv-cache uv sync
 ```
 
 建议设置 `uv` 本地缓存目录（便于权限控制与复现）:
@@ -55,6 +55,7 @@ data/
   raw/
   processed/
 scripts/
+  baselines/
   data/
   embedding/
   retrieval/
@@ -79,6 +80,9 @@ docs/
 - `outputs/embeddings/<model_name>/<run_id>/item_embeddings_<dim>.npy`: 按实验配置产出的 item 向量（可多维）
 - `outputs/embeddings/<model_name>/<run_id>/item_ids.jsonl`: 与 embedding 行对齐的 item 主键
 - `outputs/embeddings/<model_name>/<run_id>/config.json`: embedding 运行快照（含实验参数与配置哈希）
+- `outputs/baselines/<baseline_name>/<run_id>/predictions.jsonl`: baseline 对每条 query 的 topK 结果
+- `outputs/baselines/<baseline_name>/<run_id>/report.json`: baseline 指标结果
+- `outputs/baselines/<baseline_name>/<run_id>/info.json`: baseline 输入与参数快照
 - `outputs/eval/<eval_run_id>/predictions.jsonl`: 每条 query 的 topK 检索结果
 - `outputs/eval/<eval_run_id>/run_eval_report.json`: 指标结果
 - `outputs/eval/<eval_run_id>/info.json`: 本次评估输入与参数快照
@@ -340,9 +344,35 @@ fusion:
 
 离线评估指标:
 
-- `Recall@10`, `Recall@50`
-- `NDCG@10`, `NDCG@50`
-- `MRR@10`, `MRR@50`
+- `Recall@10`, `Recall@50`, `Recall@100`
+- `NDCG@10`, `NDCG@50`, `NDCG@100`
+- `MRR@10`, `MRR@50`, `MRR@100`
+
+P0 baseline 清单:
+
+- `random`
+- `global_popular`
+- `category_random`
+- `category_popular`
+
+baseline 输入约束:
+
+- 统一消费:
+  - `data/processed/items.jsonl`
+  - `data/processed/interactions.jsonl`
+  - `data/processed/eval.jsonl`
+- 统一复用与 `scripts/eval/run_eval.py` 相同的 `Recall@K` / `MRR@K` / `NDCG@K` 指标定义。
+- 统一排除 `query_item_ids` 自身，避免历史泄漏。
+- `popular` 统计当前阶段直接使用 `interactions.jsonl` 中 `rating >= rating_threshold` 的正反馈次数。
+
+baseline 规则（当前实现）:
+
+- `random`: 从全量 item 候选中随机召回 topK。
+- `global_popular`: 按正反馈计数降序召回。
+- `category_random`: 只使用最后一个 query item 的 `categories` 字符串，命中对应 category 的预构建短随机候选池；若 category 缺失或短池不足，则回退到全局 random。
+- `category_popular`: 只使用最后一个 query item 的 `categories` 字符串，命中对应 category 的预构建短热门候选池；若 category 缺失或短池不足，则回退到 global popular。
+- `category` 匹配当前仅使用 `items.jsonl` 中已落盘的完整 `categories` 字符串精确匹配，不做层级拆分。
+- baseline 在线检索不再扫描全量 item；当前默认使用长度 `128` 的预构建短候选池，以覆盖 `@100` 指标与 query-item 排除场景。
 
 评估口径:
 
@@ -380,6 +410,7 @@ fusion:
 评估脚本路径约定:
 
 - `scripts/eval/run_eval.py`
+- `scripts/baselines/retrieve_baselines.py`
 
 ## 9. 实验记录与可复现要求
 
@@ -394,6 +425,15 @@ fusion:
   - `outputs/eval/<eval_run_id>/run_eval_report.json`
   - `outputs/eval/<eval_run_id>/info.json`
   - 若 `run_eval.py --embedding-dim all`，则明细写入 `outputs/eval/<eval_run_id>/dim_<dim>/...`，根目录 `run_eval_report.json` 与 `info.json` 为汇总。
+- baseline 阶段:
+  - `outputs/baselines/<baseline_name>/<run_id>/predictions.jsonl`
+  - `outputs/baselines/<baseline_name>/<run_id>/report.json`
+  - `outputs/baselines/<baseline_name>/<run_id>/info.json`
+- plotting 阶段:
+  - `img/*.png`: embedding 模型-维度对比图
+  - `img/results.csv`, `img/summary.json`
+  - `img/baseline_comparison/*.png`: 单个 embedding vs baselines 对比图
+  - `img/baseline_comparison/results.csv`, `img/baseline_comparison/summary.json`
 
 embedding `config.json` 至少包含:
 
@@ -433,7 +473,7 @@ Review 重点:
 P0:
 
 1. 评估结果汇总脚本（读取 `outputs/eval/*/info.json` 与 `run_eval_report.json`）并产出对比表。
-2. 固化 baseline 实验配置与运行命令，保证同配置可复跑同结果。
+2. 补充 BM25 / TF-IDF 文本检索 baseline。
 3. 补充失败样本分析模板（基于 `predictions.jsonl`）。
 
 P1:

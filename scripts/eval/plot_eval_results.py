@@ -18,6 +18,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(DEFAULT_MPLCONFIGDIR))
 os.environ.setdefault("XDG_CACHE_HOME", str(DEFAULT_XDG_CACHE_HOME))
 DEFAULT_XDG_CACHE_HOME.mkdir(parents=True, exist_ok=True)
 DEFAULT_MPLCONFIGDIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_IMG_DIR = REPO_ROOT / "img"
 
 import matplotlib
 
@@ -272,9 +273,8 @@ def make_plot(metric_key: str, series: dict[str, list[tuple[int, float]]], outpu
 
 
 def derive_default_output_dir(input_path: Path) -> Path:
-    if input_path.is_dir():
-        return input_path / "plots"
-    return input_path.parent / f"{input_path.stem}_plots"
+    _ = input_path
+    return DEFAULT_IMG_DIR
 
 
 def write_summary(records: list[dict[str, Any]], output_path: Path, input_path: Path) -> None:
